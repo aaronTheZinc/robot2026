@@ -1,0 +1,40 @@
+{
+  "name": "stl-named-mesh-converter",
+  "version": "0.1.0",
+  "description": "Load STL and STEP files as Three.js Group with named meshes for animation",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "three": ">=0.150.0"
+  },
+  "optionalDependencies": {
+    "opencascade.js": "^0.3.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.169.0",
+    "typescript": "~5.9.3"
+  },
+  "peerDependencies": {
+    "three": ">=0.150.0"
+  },
+  "peerDependenciesMeta": {
+    "opencascade.js": {
+      "optional": true
+    }
+  }
+}

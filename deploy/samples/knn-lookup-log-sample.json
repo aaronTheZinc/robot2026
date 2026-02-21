@@ -1,0 +1,17 @@
+[
+  { "id": "sample-1", "x": 2.5, "y": 4.0, "rotation": 0, "timestampMs": 1700000000000, "turret": 5, "shooter": 3200, "hood": 22 },
+  { "id": "sample-2", "x": 3.0, "y": 4.2, "rotation": 8, "timestampMs": 1700000001000, "turret": 8, "shooter": 3150, "hood": 24 },
+  { "id": "sample-3", "x": 4.0, "y": 4.0, "rotation": 0, "timestampMs": 1700000002000, "turret": 0, "shooter": 3100, "hood": 26 },
+  { "id": "sample-4", "x": 5.0, "y": 3.8, "rotation": -5, "timestampMs": 1700000003000, "turret": -4, "shooter": 3050, "hood": 28 },
+  { "id": "sample-5", "x": 6.0, "y": 4.1, "rotation": 3, "timestampMs": 1700000004000, "turret": 2, "shooter": 3000, "hood": 30 },
+  { "id": "sample-6", "x": 7.0, "y": 4.0, "rotation": 0, "timestampMs": 1700000005000, "turret": 0, "shooter": 2950, "hood": 32 },
+  { "id": "sample-7", "x": 8.0, "y": 3.5, "rotation": -10, "timestampMs": 1700000006000, "turret": -9, "shooter": 2900, "hood": 34 },
+  { "id": "sample-8", "x": 2.0, "y": 2.0, "rotation": 45, "timestampMs": 1700000007000, "turret": 42, "shooter": 3400, "hood": 18 },
+  { "id": "sample-9", "x": 3.5, "y": 2.5, "rotation": 30, "timestampMs": 1700000008000, "turret": 28, "shooter": 3300, "hood": 20 },
+  { "id": "sample-10", "x": 5.0, "y": 6.0, "rotation": -15, "timestampMs": 1700000009000, "turret": -12, "shooter": 2850, "hood": 36 },
+  { "id": "sample-11", "x": 9.0, "y": 4.0, "rotation": 0, "timestampMs": 1700000010000, "turret": 0, "shooter": 2800, "hood": 38 },
+  { "id": "sample-12", "x": 10.0, "y": 4.2, "rotation": 5, "timestampMs": 1700000011000, "turret": 4, "shooter": 2750, "hood": 40 },
+  { "id": "sample-13", "x": 4.0, "y": 5.5, "rotation": -8, "timestampMs": 1700000012000, "turret": -6, "shooter": 2980, "hood": 29 },
+  { "id": "sample-14", "x": 6.5, "y": 2.0, "rotation": 25, "timestampMs": 1700000013000, "turret": 22, "shooter": 3120, "hood": 23 },
+  { "id": "sample-15", "x": 1.5, "y": 6.0, "rotation": -20, "timestampMs": 1700000014000, "turret": -18, "shooter": 3500, "hood": 15 }
+]

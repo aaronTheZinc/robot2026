@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Simple Turret – Fixed Positions</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0c12; overflow: hidden; font-family: 'Courier New', monospace; }
+    #canvas-container { width: 100vw; height: 100vh; }
+    #ui {
+      position: fixed; top: 20px; right: 20px; 
+      background: rgba(10,14,28,0.92);
+      border: 1px solid #1e3a5f;
+      border-radius: 4px;
+      padding: 20px;
+      color: #7eb8d4;
+      width: 280px;
+      box-shadow: 0 0 30px rgba(30,90,160,0.3);
+    }
+    #ui h2 {
+      color: #4fc3f7;
+      font-size: 11px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-bottom: 18px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #1e3a5f;
+    }
+    .control-group { margin-bottom: 16px; }
+    .control-group label {
+      display: flex; justify-content: space-between;
+      font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
+      color: #5a8fa8; margin-bottom: 6px;
+    }
+    .control-group label span { color: #4fc3f7; }
+    input[type=range] {
+      width: 100%;
+      -webkit-appearance: none;
+      height: 3px;
+      background: #1e3a5f;
+      border-radius: 2px;
+      outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px; height: 14px;
+      background: #4fc3f7;
+      border-radius: 50%;
+      cursor: pointer;
+      box-shadow: 0 0 8px rgba(79,195,247,0.6);
+    }
+    .info-row {
+      font-size: 9px; color: #3a6a88;
+      letter-spacing: 1px; margin-top: 3px;
+    }
+    #gear-info {
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid #1e3a5f;
+      font-size: 9px;
+      color: #3a6a88;
+      line-height: 1.8;
+      letter-spacing: 0.5px;
+    }
+    #gear-info span { color: #4fc3f7; }
+    #legend {
+      position: fixed; bottom: 20px; left: 20px;
+      font-size: 9px; color: #3a6a88; letter-spacing: 1px;
+      line-height: 2;
+    }
+    #legend span { color: #5a8fa8; }
+  </style>
+</head>
+<body>
+<div id="canvas-container"></div>
+
+<div id="ui">
+  <h2>Shooter Mechanism</h2>
+
+  <div class="control-group">
+    <label>Turret Rotation <span id="rot-val">0°</span></label>
+    <input type="range" id="rotation" min="-180" max="180" value="0" step="1">
+    <div class="info-row">Full 360° yaw about vertical axis</div>
+  </div>
+
+  <div class="control-group">
+    <label>Hood Angle <span id="hood-val">0°</span></label>
+    <input type="range" id="hood" min="0" max="90" value="0" step="0.5">
+    <div class="info-row">0° = flat, 90° = vertical</div>
+  </div>
+
+  <div class="control-group">
+    <label>Shooter Velocity <span id="vel-val">0 m/s</span></label>
+    <input type="range" id="velocity" min="0" max="30" value="0" step="0.5">
+    <div class="info-row">Flywheel surface speed</div>
+  </div>
+
+  <div id="gear-info">
+    <b style="color:#5a8fa8;letter-spacing:2px;font-size:9px;">GEAR TRAIN</b><br>
+    Quarter-circle rack: <span>20 teeth</span><br>
+    Pinion: <span>10 teeth</span><br>
+    Ratio: <span>2:1</span> (pinion 2× hood)<br>
+    Pinion rotation: <span id="pinion-val">0.0°</span><br>
+    Module: ~<span>2mm</span>
+  </div>
+</div>
+
+<div id="legend">
+  <span>MOUSE</span> — orbit / zoom / pan<br>
+  <span>SLIDERS</span> — control mechanism
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ─── Scene Setup ─────────────────────────────────────────────────────────────
+const container = document.getElementById('canvas-container');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0c12);
+scene.fog = new THREE.FogExp2(0x0a0c12, 0.025);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 100);
+camera.position.set(1.2, 1.0, 2.2);
+
+// ─── Orbit Controls (minimal, no import needed) ───────────────────────────
+let isDragging = false, lastMouse = {x:0,y:0};
+let spherical = {theta: 0.4, phi: 1.0, radius: 2.8};
+let panOffset = new THREE.Vector3(0, 0.3, 0);
+
+function updateCamera() {
+  camera.position.set(
+    panOffset.x + spherical.radius * Math.sin(spherical.phi) * Math.sin(spherical.theta),
+    panOffset.y + spherical.radius * Math.cos(spherical.phi),
+    panOffset.z + spherical.radius * Math.sin(spherical.phi) * Math.cos(spherical.theta)
+  );
+  camera.lookAt(panOffset);
+}
+updateCamera();
+
+renderer.domElement.addEventListener('mousedown', e => { isDragging = true; lastMouse = {x:e.clientX,y:e.clientY}; });
+renderer.domElement.addEventListener('mouseup', () => isDragging = false);
+renderer.domElement.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  const dx = (e.clientX - lastMouse.x) * 0.008;
+  const dy = (e.clientY - lastMouse.y) * 0.008;
+  spherical.theta -= dx;
+  spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi + dy));
+  lastMouse = {x:e.clientX,y:e.clientY};
+  updateCamera();
+});
+renderer.domElement.addEventListener('wheel', e => {
+  spherical.radius = Math.max(0.5, Math.min(8, spherical.radius + e.deltaY * 0.003));
+  updateCamera();
+});
+
+// ─── Lights ───────────────────────────────────────────────────────────────
+const ambient = new THREE.AmbientLight(0x112244, 0.8);
+scene.add(ambient);
+
+const key = new THREE.DirectionalLight(0x4488cc, 2.0);
+key.position.set(3, 5, 3);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+scene.add(key);
+
+const fill = new THREE.DirectionalLight(0x221133, 0.6);
+fill.position.set(-3, 2, -2);
+scene.add(fill);
+
+const rim = new THREE.DirectionalLight(0x0044ff, 0.4);
+rim.position.set(0, -1, -3);
+scene.add(rim);
+
+// Grid
+const grid = new THREE.GridHelper(6, 30, 0x1e3a5f, 0x0f1e30);
+grid.position.y = -0.01;
+scene.add(grid);
+
+// ─── Materials ────────────────────────────────────────────────────────────
+const matAlum = new THREE.MeshStandardMaterial({ color: 0x8899bb, metalness: 0.85, roughness: 0.25 });
+const matSteel = new THREE.MeshStandardMaterial({ color: 0x445566, metalness: 0.95, roughness: 0.15 });
+const matWheelRed = new THREE.MeshStandardMaterial({ color: 0xcc2233, metalness: 0.3, roughness: 0.7 });
+const matAccent = new THREE.MeshStandardMaterial({ color: 0x4fc3f7, metalness: 0.5, roughness: 0.4, emissive: 0x1a4060, emissiveIntensity: 0.3 });
+const matGear = new THREE.MeshStandardMaterial({ color: 0x334455, metalness: 0.9, roughness: 0.2 });
+const matPlate = new THREE.MeshStandardMaterial({ color: 0x667799, metalness: 0.7, roughness: 0.35 });
+const matHub = new THREE.MeshStandardMaterial({ color: 0x222233, metalness: 0.8, roughness: 0.3 });
+
+// ─── Geometry Helpers ─────────────────────────────────────────────────────
+
+function makeBox(w, h, d, mat) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  return new THREE.Mesh(g, mat);
+}
+
+function makeCyl(rt, rb, h, seg, mat) {
+  const g = new THREE.CylinderGeometry(rt, rb, h, seg);
+  return new THREE.Mesh(g, mat);
+}
+
+// Create a spur gear shape (extruded)
+function createGearMesh(teeth, moduleSize, faceWidth, mat) {
+  const pitchR = teeth * moduleSize / 2;
+  const addendum = moduleSize;
+  const dedendum = 1.25 * moduleSize;
+  const outerR = pitchR + addendum;
+  const rootR = pitchR - dedendum;
+
+  const shape = new THREE.Shape();
+  const toothAngle = (2 * Math.PI) / teeth;
+
+  for (let i = 0; i < teeth; i++) {
+    const base = i * toothAngle;
+    const t0 = base - toothAngle * 0.2;
+    const t1 = base - toothAngle * 0.08;
+    const t2 = base + toothAngle * 0.08;
+    const t3 = base + toothAngle * 0.2;
+
+    if (i === 0) {
+      shape.moveTo(rootR * Math.cos(t0), rootR * Math.sin(t0));
+    } else {
+      shape.lineTo(rootR * Math.cos(t0), rootR * Math.sin(t0));
+    }
+    shape.lineTo(outerR * Math.cos(t1), outerR * Math.sin(t1));
+    shape.lineTo(outerR * Math.cos(t2), outerR * Math.sin(t2));
+    shape.lineTo(rootR * Math.cos(t3), rootR * Math.sin(t3));
+  }
+  shape.closePath();
+
+  // Bore hole
+  const hole = new THREE.Path();
+  hole.absarc(0, 0, rootR * 0.45, 0, Math.PI * 2, true);
+  shape.holes.push(hole);
+
+  const extSettings = { depth: faceWidth, bevelEnabled: false, steps: 1 };
+  const geo = new THREE.ExtrudeGeometry(shape, extSettings);
+  geo.center();
+  const mesh = new THREE.Mesh(geo, mat);
+  return mesh;
+}
+
+// Create quarter-circle rack (20 teeth on 90° arc)
+function createQuarterRack(teeth, moduleSize, faceWidth, mat) {
+  const totalTeeth = 20;
+  const pitchR = totalTeeth * moduleSize / (Math.PI / 2); // pitch radius so arc = teeth*module
+  const addendum = moduleSize;
+  const dedendum = 1.25 * moduleSize;
+  const outerR = pitchR + addendum;
+  const rootR = pitchR - dedendum;
+  const arcSpan = Math.PI / 2;
+  const toothAngle = arcSpan / totalTeeth;
+
+  const shape = new THREE.Shape();
+  const startAngle = -arcSpan / 2;
+
+  shape.moveTo(rootR * Math.cos(startAngle), rootR * Math.sin(startAngle));
+
+  for (let i = 0; i < totalTeeth; i++) {
+    const base = startAngle + i * toothAngle;
+    const t0 = base;
+    const t1 = base + toothAngle * 0.3;
+    const t2 = base + toothAngle * 0.7;
+    const t3 = base + toothAngle;
+
+    shape.lineTo(rootR * Math.cos(t0), rootR * Math.sin(t0));
+    shape.lineTo(outerR * Math.cos(t1), outerR * Math.sin(t1));
+    shape.lineTo(outerR * Math.cos(t2), outerR * Math.sin(t2));
+    shape.lineTo(rootR * Math.cos(t3), rootR * Math.sin(t3));
+  }
+
+  // Close back along inner arc
+  for (let a = arcSpan / 2; a >= -arcSpan / 2; a -= 0.15) {
+    shape.lineTo((rootR - faceWidth * 0.8) * Math.cos(a), (rootR - faceWidth * 0.8) * Math.sin(a));
+  }
+  shape.closePath();
+
+  const extSettings = { depth: faceWidth * 0.6, bevelEnabled: false };
+  const geo = new THREE.ExtrudeGeometry(shape, extSettings);
+  const mesh = new THREE.Mesh(geo, mat);
+  return mesh;
+}
+
+// ─── Turret Base ─────────────────────────────────────────────────────────
+const turretBase = new THREE.Group();
+scene.add(turretBase);
+
+// Base plate
+const basePlate = makeBox(0.5, 0.04, 0.5, matPlate);
+basePlate.position.y = 0.02;
+basePlate.castShadow = true;
+turretBase.add(basePlate);
+
+// Mounting posts
+for (let dx of [-0.18, 0.18]) {
+  for (let dz of [-0.18, 0.18]) {
+    const post = makeCyl(0.015, 0.015, 0.12, 8, matSteel);
+    post.position.set(dx, 0.08, dz);
+    post.castShadow = true;
+    turretBase.add(post);
+  }
+}
+
+// Center bearing
+const bearing = makeCyl(0.04, 0.04, 0.05, 16, matSteel);
+bearing.position.y = 0.045;
+turretBase.add(bearing);
+
+// ─── Turret (rotates) ─────────────────────────────────────────────────────
+const turret = new THREE.Group();
+turret.position.y = 0.07;
+turretBase.add(turret);
+
+// Turret ring
+const turretRing = makeCyl(0.07, 0.07, 0.03, 32, matAccent);
+turretRing.position.y = 0;
+turret.add(turretRing);
+
+// Turret top plate
+const turretTop = makeBox(0.38, 0.025, 0.3, matAlum);
+turretTop.position.y = 0.025;
+turret.add(turretTop);
+
+// Side plates (left/right)
+for (let side of [-1, 1]) {
+  const sp = makeBox(0.025, 0.18, 0.3, matAlum);
+  sp.position.set(side * 0.18, 0.12, 0);
+  sp.castShadow = true;
+  turret.add(sp);
+}
+
+// ─── Flywheel Assembly (fixed to turret) ────────────────────────────────────
+const FLYWHEEL_Y = 0.25;          // raised a bit for better gear clearance
+const FLYWHEEL_Z = 0.06;          // forward of pivot (toward camera)
+const FLYWHEEL_R = 0.085;          // radius
+
+const flywheelGroup = new THREE.Group();
+flywheelGroup.position.set(0, FLYWHEEL_Y, FLYWHEEL_Z);
+turret.add(flywheelGroup);
+
+// Two flywheels (side by side)
+for (let side of [-0.06, 0.06]) {
+  const wheel = makeCyl(FLYWHEEL_R, FLYWHEEL_R, 0.03, 32, matWheelRed);
+  wheel.rotation.z = Math.PI / 2;   // make cylinder axis X
+  wheel.position.x = side;
+  wheel.castShadow = true;
+  flywheelGroup.add(wheel);
+
+  // Hub
+  const hub = makeCyl(0.025, 0.025, 0.035, 16, matHub);
+  hub.rotation.z = Math.PI / 2;
+  hub.position.x = side;
+  flywheelGroup.add(hub);
+}
+
+// Axle (visual)
+const axle = makeCyl(0.01, 0.01, 0.2, 12, matSteel);
+axle.rotation.z = Math.PI / 2;
+axle.position.x = 0;
+flywheelGroup.add(axle);
+
+// Motor behind flywheel
+const motor = makeCyl(0.038, 0.038, 0.09, 16, matHub);
+motor.rotation.z = Math.PI / 2;
+motor.position.set(-0.12, 0, 0);
+flywheelGroup.add(motor);
+
+// ─── Hood Pivot (located at flywheel axle) ───────────────────────────────────
+const hoodPivotGroup = new THREE.Group();
+hoodPivotGroup.position.set(0, FLYWHEEL_Y, FLYWHEEL_Z);   // same as flywheel center
+turret.add(hoodPivotGroup);
+
+// ─── Gear Train ───────────────────────────────────────────────────────────
+const MODULE = 0.018;
+const PINION_TEETH = 10;
+const RACK_TEETH = 20;
+const PINION_PITCH_R = PINION_TEETH * MODULE / 2;        // 0.09
+const RACK_PITCH_R = RACK_TEETH * MODULE / (Math.PI / 2); // ≈0.229
+const CENTER_DIST = RACK_PITCH_R + PINION_PITCH_R;       // 0.319
+
+// Pinion (fixed to turret) – placed directly below pivot at correct distance
+const pinionGroup = new THREE.Group();
+pinionGroup.position.set(0.12, FLYWHEEL_Y - CENTER_DIST, FLYWHEEL_Z); // right side, below
+turret.add(pinionGroup);
+
+const pinionMesh = createGearMesh(PINION_TEETH, MODULE, 0.04, matGear);
+pinionMesh.rotation.x = Math.PI / 2;   // make gear rotate about X
+pinionMesh.rotation.y = 0;              // no extra twist
+pinionGroup.add(pinionMesh);
+
+// Pinion shaft
+const pinionShaft = makeCyl(0.008, 0.008, 0.1, 12, matSteel);
+pinionShaft.rotation.x = Math.PI / 2;
+pinionGroup.add(pinionShaft);
+
+// Rack (attached to hood, on right side)
+const rackGroup = new THREE.Group();
+rackGroup.position.set(0.12, 0, 0);   // offset to right from pivot
+hoodPivotGroup.add(rackGroup);
+
+const rackMesh = createQuarterRack(RACK_TEETH, MODULE, 0.04, matGear);
+rackMesh.rotation.x = Math.PI / 2;        // make arc lie in YZ plane
+rackMesh.rotation.y = 0;
+rackMesh.rotation.z = -Math.PI / 2;       // rotate so teeth face downward at hood=0°
+rackGroup.add(rackMesh);
+
+// Pitch circle indicator (visual)
+const rackPitchRing = new THREE.Mesh(
+  new THREE.TorusGeometry(RACK_PITCH_R, 0.003, 8, 40, Math.PI/2),
+  new THREE.MeshStandardMaterial({color: 0x4fc3f7, emissive: 0x224466, emissiveIntensity: 0.5})
+);
+rackPitchRing.rotation.x = Math.PI / 2;
+rackGroup.add(rackPitchRing);
+
+// ─── Hood Structure ──────────────────────────────────────────────────────
+const hoodAssembly = new THREE.Group();
+hoodPivotGroup.add(hoodAssembly);
+
+// Hood side arms (two plates)
+for (let side of [-0.09, 0.09]) {
+  const arm = makeBox(0.025, 0.22, 0.025, matAlum);
+  arm.position.set(side, 0.11, -0.12);   // extend backward (-Z)
+  arm.castShadow = true;
+  hoodAssembly.add(arm);
+}
+
+// Main hood plate (the angled deflector)
+const hoodPlate = makeBox(0.22, 0.012, 0.18, matAlum);
+hoodPlate.position.set(0, 0.22, -0.24);   // further back
+hoodPlate.castShadow = true;
+hoodAssembly.add(hoodPlate);
+
+// Hood lip (end stop)
+const hoodLip = makeBox(0.22, 0.04, 0.012, matAccent);
+hoodLip.position.set(0, 0.22, -0.16);    // at front of hood plate
+hoodAssembly.add(hoodLip);
+
+// Sensor box on top
+const sensorBox = makeBox(0.1, 0.08, 0.06, matHub);
+sensorBox.position.set(0, 0.3, -0.2);
+hoodAssembly.add(sensorBox);
+
+// ─── Ball channel (below flywheel) ────────────────────────────────────────
+const channelGroup = new THREE.Group();
+channelGroup.position.set(0, 0.15, 0.0); // below flywheel
+turret.add(channelGroup);
+
+for (let s of [-0.075, 0.075]) {
+  const ch = makeBox(0.012, 0.06, 0.22, matPlate);
+  ch.position.set(s, 0.0, 0.05);
+  ch.castShadow = true;
+  channelGroup.add(ch);
+}
+
+// ─── Pivot marker (visual) ───────────────────────────────────────────────
+const pivotMarker = new THREE.Mesh(
+  new THREE.SphereGeometry(0.008, 16, 16),
+  new THREE.MeshStandardMaterial({ color: 0xffdd44, emissive: 0x664400, emissiveIntensity: 1 })
+);
+pivotMarker.position.set(0, FLYWHEEL_Y, FLYWHEEL_Z);
+turret.add(pivotMarker);
+
+// ─── Speed indicator light ────────────────────────────────────────────────
+const speedLight = new THREE.PointLight(0x4444ff, 0, 0.5);
+speedLight.position.set(0, FLYWHEEL_Y, FLYWHEEL_Z);
+turret.add(speedLight);
+
+// ─── State ────────────────────────────────────────────────────────────────
+let state = { rotation: 0, hoodAngle: 0, velocity: 0 };
+const GEAR_RATIO = RACK_TEETH / PINION_TEETH; // 2.0
+
+// UI
+const rotSlider = document.getElementById('rotation');
+const hoodSlider = document.getElementById('hood');
+const velSlider = document.getElementById('velocity');
+
+function updateUI() {
+  document.getElementById('rot-val').textContent = state.rotation.toFixed(0) + '°';
+  document.getElementById('hood-val').textContent = state.hoodAngle.toFixed(1) + '°';
+  document.getElementById('vel-val').textContent = state.velocity.toFixed(1) + ' m/s';
+  const pinionAngle = state.hoodAngle * GEAR_RATIO;
+  document.getElementById('pinion-val').textContent = pinionAngle.toFixed(1) + '°';
+}
+
+rotSlider.addEventListener('input', () => { state.rotation = parseFloat(rotSlider.value); updateUI(); });
+hoodSlider.addEventListener('input', () => { state.hoodAngle = parseFloat(hoodSlider.value); updateUI(); });
+velSlider.addEventListener('input', () => { state.velocity = parseFloat(velSlider.value); updateUI(); });
+
+// ─── Animate ─────────────────────────────────────────────────────────────
+let clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+  const t = clock.getElapsedTime();
+
+  // 1) Turret rotation (yaw)
+  turret.rotation.y = state.rotation * Math.PI / 180;
+
+  // 2) Hood elevation: rotate about X axis
+  //    At 0° hood points backward (-Z), at 90° points up (+Y)
+  hoodPivotGroup.rotation.x = state.hoodAngle * Math.PI / 180;
+
+  // 3) Pinion rotates with gear ratio (opposite direction to maintain mesh)
+  //    Pinion rotates about X as well.
+  pinionMesh.rotation.x = state.hoodAngle * GEAR_RATIO * Math.PI / 180;
+
+  // 4) Flywheel spin
+  const flywheelOmega = state.velocity / FLYWHEEL_R; // rad/s
+  flywheelGroup.rotation.x += flywheelOmega * dt;
+
+  // 5) Speed glow
+  const speedNorm = state.velocity / 30;
+  speedLight.intensity = speedNorm * 2.5;
+  matWheelRed.emissive.setScalar(speedNorm * 0.4);
+
+  // 6) Subtle idle pulse on turret ring
+  turretRing.material.emissiveIntensity = 0.2 + 0.1 * Math.sin(t * 2);
+
+  renderer.render(scene, camera);
+}
+
+animate();
+updateUI();
+
+// Resize
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
