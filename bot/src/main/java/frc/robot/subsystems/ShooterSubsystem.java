@@ -18,9 +18,6 @@ import com.ctre.phoenix6.signals.NeutralModeValue;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.ShooterConstants;
-import frc.robot.commands.RunHoodCommand;
-import frc.robot.commands.RunShooterLeftCommand;
-import frc.robot.commands.RunShooterRightCommand;
 import frc.robot.generated.TunerConstants;
 
 public class ShooterSubsystem extends SubsystemBase {
@@ -54,12 +51,6 @@ public class ShooterSubsystem extends SubsystemBase {
         hoodMotor.getConfigurator().apply(hoodCurrentLimits);
         var hoodOutput = new MotorOutputConfigs().withNeutralMode(NeutralModeValue.Brake);
         hoodMotor.getConfigurator().apply(hoodOutput);
-
-        // Test commands on SmartDashboard: run left/right shooter and hood individually
-        SmartDashboard.putData("Test Shooter Left", new RunShooterLeftCommand(this));
-        SmartDashboard.putData("Test Shooter Right", new RunShooterRightCommand(this));
-        SmartDashboard.putData("Test Hood Forward", new RunHoodCommand(this, 0.3));
-        SmartDashboard.putData("Test Hood Back", new RunHoodCommand(this, -0.3));
     }
 
     /** Set both shooter motors to the same voltage. */

@@ -13,9 +13,11 @@ import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.commands.FollowPathCommand;
 
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.RunCommand;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
@@ -24,6 +26,8 @@ import frc.robot.commands.HoodHomingCommand;
 import frc.robot.generated.TunerConstants;
 import frc.robot.knn.KnnInterpreter;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
+import frc.robot.subsystems.IntakeSubsystem;
+import frc.robot.subsystems.MotorTestSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.VisionMeasurement;
 
@@ -44,11 +48,14 @@ public class RobotContainer {
     private final KnnInterpreter knnInterpreter = new KnnInterpreter();
 
     private final CommandXboxController joystick = new CommandXboxController(0);
+    private final CommandXboxController subsystems = new CommandXboxController(1);
 
     public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
     /** Fuses Limelight pose estimates with drivetrain odometry when running periodically. */
     public final VisionMeasurement visionMeasurement = new VisionMeasurement(drivetrain);
     private final ShooterSubsystem shooter = new ShooterSubsystem();
+    private final IntakeSubsystem intake = new IntakeSubsystem();
+    private final MotorTestSubsystem motorTest = new MotorTestSubsystem(shooter, intake, drivetrain);
 
     /* Path follower */
     private final SendableChooser<Command> autoChooser;
@@ -57,10 +64,22 @@ public class RobotContainer {
         autoChooser = AutoBuilder.buildAutoChooser("Tests");
         SmartDashboard.putData("Auto Mode", autoChooser);
 
+        seedMotorTestNetworkTables();
+
         configureBindings();
 
-        // Warmup PathPlanner to avoid Java pauses
-        FollowPathCommand.warmupCommand().schedule();
+        // Run MotorTestSubsystem.periodic() every cycle so NT-driven motor test is applied when disabled
+        new RunCommand(() -> {}, motorTest).ignoringDisable(true).schedule();
+    }
+
+    private void seedMotorTestNetworkTables() {
+        var table = NetworkTableInstance.getDefault().getTable("MotorTest");
+        table.getEntry("Speed").setDouble(0.15);
+        table.getEntry("Motor").setString("shooterLeft");
+        table.getEntry("Enable").setBoolean(false);
+        SmartDashboard.putNumber("MotorTest/Speed", 0.15);
+        SmartDashboard.putString("MotorTest/Motor", "shooterLeft");
+        SmartDashboard.putBoolean("MotorTest/Enable", false);
     }
 
     private void configureBindings() {
