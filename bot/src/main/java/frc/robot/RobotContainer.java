@@ -10,7 +10,6 @@ import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 
 import com.pathplanner.lib.auto.AutoBuilder;
-import com.pathplanner.lib.commands.FollowPathCommand;
 
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.networktables.NetworkTableInstance;
@@ -93,6 +92,8 @@ public class RobotContainer {
         driveCommand.addRequirements(visionMeasurement);
         drivetrain.setDefaultCommand(driveCommand);
 
+        intake.setDefaultCommand(new RunCommand(intake::stow, intake));
+
         // Idle while the robot is disabled. This ensures the configured
         // neutral mode is applied to the drive motors while disabled.
         final var idle = new SwerveRequest.Idle();
@@ -122,6 +123,14 @@ public class RobotContainer {
         // Reset the field-centric heading on left bumper press.
         joystick.leftBumper().onTrue(drivetrain.runOnce(drivetrain::seedFieldCentric));
 
+        // Intake (subsystems controller): pivot + roller + hopper
+        subsystems.a().whileTrue(new RunCommand(intake::intake, intake));
+        subsystems.b().whileTrue(new RunCommand(intake::outtake, intake));
+        subsystems.x().onTrue(intake.runOnce(intake::stow));
+        subsystems.y().whileTrue(new RunCommand(intake::collect, intake));
+        subsystems.rightBumper().whileTrue(new RunCommand(intake::feedToShooter, intake));
+        subsystems.leftBumper().onTrue(intake.runOnce(intake::stopAll));
+
         drivetrain.registerTelemetry(state -> {
             logger.telemeterize(state);
             knnInterpreter.update(state.Pose);
@@ -135,6 +144,10 @@ public class RobotContainer {
 
     public ShooterSubsystem getShooter() {
         return shooter;
+    }
+
+    public IntakeSubsystem getIntake() {
+        return intake;
     }
 
     /** Hood homing for real robot; schedule when enabling (auto or teleop). */

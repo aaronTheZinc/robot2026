@@ -14,6 +14,7 @@ import com.revrobotics.spark.config.ClosedLoopConfig;
 import com.revrobotics.spark.config.SparkBaseConfig;
 import com.revrobotics.spark.config.SparkMaxConfig;
 
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.IntakeConstants;
 
@@ -48,6 +49,11 @@ public class IntakeSubsystem extends SubsystemBase {
         var hopperConfig = new SparkMaxConfig()
                 .idleMode(SparkBaseConfig.IdleMode.kBrake);
         hopperMotor.configure(hopperConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+    }
+
+    @Override
+    public void periodic() {
+        SmartDashboard.putNumber("Intake/PivotRotations", getPivotRotations());
     }
 
     // ----- Pivot (up/down) positions -----
