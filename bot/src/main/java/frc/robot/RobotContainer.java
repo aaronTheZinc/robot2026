@@ -19,9 +19,13 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.RunCommand;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
+import edu.wpi.first.wpilibj2.command.button.Trigger;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 
 import frc.robot.commands.HoodHomingCommand;
+import frc.robot.commands.test.RunMotorTestCommand;
+import frc.robot.subsystems.MotorTestConstants;
+import frc.robot.subsystems.MotorTestConstants.TestButton;
 import frc.robot.generated.TunerConstants;
 import frc.robot.knn.KnnInterpreter;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
@@ -64,6 +68,7 @@ public class RobotContainer {
         SmartDashboard.putData("Auto Mode", autoChooser);
 
         seedMotorTestNetworkTables();
+        registerMotorTestCommandsOnSmartDashboard();
 
         configureBindings();
 
@@ -73,12 +78,44 @@ public class RobotContainer {
 
     private void seedMotorTestNetworkTables() {
         var table = NetworkTableInstance.getDefault().getTable("MotorTest");
-        table.getEntry("Speed").setDouble(0.15);
+        table.getEntry("Speed").setDouble(MotorTestConstants.kDefaultSpeed);
         table.getEntry("Motor").setString("shooterLeft");
         table.getEntry("Enable").setBoolean(false);
-        SmartDashboard.putNumber("MotorTest/Speed", 0.15);
+        SmartDashboard.putNumber("MotorTest/Speed", MotorTestConstants.kDefaultSpeed);
         SmartDashboard.putString("MotorTest/Motor", "shooterLeft");
         SmartDashboard.putBoolean("MotorTest/Enable", false);
+        for (String motorId : MotorTestConstants.getMotorIds()) {
+            boolean defaultInvert = MotorTestConstants.getDefaultInvert(motorId);
+            table.getEntry("Invert_" + motorId).setBoolean(defaultInvert);
+            SmartDashboard.putBoolean("MotorTest/Invert_" + motorId, defaultInvert);
+        }
+    }
+
+    /** Test speed from subsystems left stick Y; clamped to [-1, 1]. Positive stick forward = positive speed. */
+    private double getTestSpeedFromAxis() {
+        return Math.max(-1, Math.min(1, -subsystems.getLeftY()));
+    }
+
+    private void registerMotorTestCommandsOnSmartDashboard() {
+        for (String motorId : MotorTestConstants.getMotorIds()) {
+            String displayName = MotorTestConstants.getDisplayName(motorId);
+            SmartDashboard.putData("Motor Test/" + displayName,
+                    RunMotorTestCommand.atFixedSpeed(motorId, MotorTestConstants.getDefaultSpeed(), motorTest));
+        }
+    }
+
+    /** Returns the trigger for the given button on the given controller. */
+    private Trigger triggerFor(CommandXboxController controller, TestButton button) {
+        return switch (button) {
+            case A -> controller.a();
+            case B -> controller.b();
+            case X -> controller.x();
+            case Y -> controller.y();
+            case LEFT_BUMPER -> controller.leftBumper();
+            case RIGHT_BUMPER -> controller.rightBumper();
+            case POV_UP -> controller.povUp();
+            case POV_DOWN -> controller.povDown();
+        };
     }
 
     private void configureBindings() {
@@ -135,6 +172,17 @@ public class RobotContainer {
             logger.telemeterize(state);
             knnInterpreter.update(state.Pose);
         });
+
+        // Motor test (Test mode only): bindings from MotorTestConstants; speed from subsystems left Y
+        Trigger inTest = new Trigger(Robot::inTestMode);
+        for (var entry : MotorTestConstants.getController0Bindings().entrySet()) {
+            inTest.and(triggerFor(joystick, entry.getKey()))
+                    .whileTrue(new RunMotorTestCommand(entry.getValue(), this::getTestSpeedFromAxis, motorTest));
+        }
+        for (var entry : MotorTestConstants.getController1Bindings().entrySet()) {
+            inTest.and(triggerFor(subsystems, entry.getKey()))
+                    .whileTrue(new RunMotorTestCommand(entry.getValue(), this::getTestSpeedFromAxis, motorTest));
+        }
     }
 
     public Command getAutonomousCommand() {

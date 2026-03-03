@@ -130,6 +130,13 @@ public class IntakeSubsystem extends SubsystemBase {
         hopperMotor.set(0);
     }
 
+    /**
+     * Run hopper at normalized speed [-1, 1] for motor test (open-loop).
+     */
+    public void setHopperSpeed(double speed) {
+        hopperMotor.set(Math.max(-1, Math.min(1, speed)));
+    }
+
     // ----- Composite actions: intake, outtake, stow, collect -----
 
     /** Intake: pivot to intake position, run roller in, hopper off (or run if feeding). */

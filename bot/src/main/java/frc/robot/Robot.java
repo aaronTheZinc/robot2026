@@ -11,8 +11,16 @@ import edu.wpi.first.net.PortForwarder;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import edu.wpi.first.wpilibj2.command.RunCommand;
 
 public class Robot extends TimedRobot {
+    /** True when Driver Station is in Test mode; used to gate test bindings and motor test periodic. */
+    private static boolean s_inTestMode;
+
+    /** Returns true when the robot is in Test mode (Driver Station Test selected). */
+    public static boolean inTestMode() {
+        return s_inTestMode;
+    }
     /** Limelight host for simulation; access at http://localhost:5801 when forwarded. */
     private static final String LIMELIGHT_HOST = "limelight.local";
     private static final int LIMELIGHT_PORT_START = 5800;
@@ -100,14 +108,21 @@ public class Robot extends TimedRobot {
 
     @Override
     public void testInit() {
+        s_inTestMode = true;
         CommandScheduler.getInstance().cancelAll();
+        // Block drive/intake defaults so only test bindings run
+        new RunCommand(() -> {}, m_robotContainer.drivetrain, m_robotContainer.getIntake())
+                .ignoringDisable(true)
+                .schedule();
     }
 
     @Override
     public void testPeriodic() {}
 
     @Override
-    public void testExit() {}
+    public void testExit() {
+        s_inTestMode = false;
+    }
 
     @Override
     public void simulationPeriodic() {}

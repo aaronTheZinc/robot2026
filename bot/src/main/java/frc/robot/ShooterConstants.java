@@ -51,4 +51,21 @@ public final class ShooterConstants {
 
     /** Test speed [-1, 1] for shooter test commands (e.g. 0.25 for reduced testing). */
     public static final double kTestSpeed = 0.25;
+
+    // ----- Motor test (all test speeds and inversion for shooter/hood in this file) -----
+
+    /** Motor test: min/max normalized speed and default invert for left shooter. */
+    public static final double kShooterLeftTestMinSpeed = -1.0;
+    public static final double kShooterLeftTestMaxSpeed = 1.0;
+    public static final boolean kShooterLeftTestDefaultInvert = false;
+
+    /** Motor test: min/max normalized speed and default invert for right shooter. */
+    public static final double kShooterRightTestMinSpeed = -1.0;
+    public static final double kShooterRightTestMaxSpeed = 1.0;
+    public static final boolean kShooterRightTestDefaultInvert = false;
+
+    /** Motor test: min/max normalized speed and default invert for hood (limited for safety). */
+    public static final double kHoodTestMinSpeed = -0.3;
+    public static final double kHoodTestMaxSpeed = 0.3;
+    public static final boolean kHoodTestDefaultInvert = false;
 }

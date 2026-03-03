@@ -36,4 +36,21 @@ public final class IntakeConstants {
 
     /** Hopper speed [-1, 1] when feeding the shooter. */
     public static final double kHopperFeedSpeed = 0.7;
+
+    // ----- Motor test (all test speeds and inversion for intake motors in this file) -----
+
+    /** Motor test: min/max normalized speed and default invert for roller. */
+    public static final double kRollerTestMinSpeed = -1.0;
+    public static final double kRollerTestMaxSpeed = 1.0;
+    public static final boolean kRollerTestDefaultInvert = false;
+
+    /** Motor test: min/max normalized speed and default invert for pivot (limited for safety). */
+    public static final double kPivotTestMinSpeed = -0.5;
+    public static final double kPivotTestMaxSpeed = 0.5;
+    public static final boolean kPivotTestDefaultInvert = false;
+
+    /** Motor test: min/max normalized speed and default invert for hopper. */
+    public static final double kHopperTestMinSpeed = -1.0;
+    public static final double kHopperTestMaxSpeed = 1.0;
+    public static final boolean kHopperTestDefaultInvert = false;
 }
