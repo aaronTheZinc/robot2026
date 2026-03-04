@@ -39,6 +39,11 @@ public class ShooterSubsystem extends SubsystemBase {
         var motorOutput = new MotorOutputConfigs().withInverted(InvertedValue.Clockwise_Positive);
         shooterRight.getConfigurator().apply(motorOutput);
 
+        var motorOutputLeft = new MotorOutputConfigs().withInverted(InvertedValue.CounterClockwise_Positive);
+        shooterLeft.getConfigurator().apply(motorOutputLeft);
+
+
+
         // Hood: PID slot for position control, current limit, brake when idle
         var hoodSlot0 = new Slot0Configs()
                 .withKP(ShooterConstants.kHoodKp)
@@ -51,6 +56,10 @@ public class ShooterSubsystem extends SubsystemBase {
         hoodMotor.getConfigurator().apply(hoodCurrentLimits);
         var hoodOutput = new MotorOutputConfigs().withNeutralMode(NeutralModeValue.Brake);
         hoodMotor.getConfigurator().apply(hoodOutput);
+
+        if(ShooterConstants.kShooterLeftTestDefaultInvert) {
+
+        }
     }
 
     /** Set both shooter motors to the same voltage. */

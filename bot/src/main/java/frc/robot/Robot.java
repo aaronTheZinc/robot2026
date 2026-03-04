@@ -93,6 +93,8 @@ public class Robot extends TimedRobot {
             CommandScheduler.getInstance().cancel(m_autonomousCommand);
         }
 
+        
+
         if (Utils.isSimulation()) {
             m_robotContainer.getShooter().setShooterReady(true);
         } else {

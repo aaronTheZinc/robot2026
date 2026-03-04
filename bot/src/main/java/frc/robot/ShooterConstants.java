@@ -9,9 +9,9 @@ public final class ShooterConstants {
     private ShooterConstants() {}
 
     /** CAN ID for the left shooter Talon FX. */
-    public static final int kShooterLeftId = 40;
+    public static final int kShooterLeftId = 41;
     /** CAN ID for the right shooter Talon FX. */
-    public static final int kShooterRightId = 41;
+    public static final int kShooterRightId = 40;
     /** CAN ID for the hood Talon FX. */
     public static final int kHoodMotorId = 50;
 

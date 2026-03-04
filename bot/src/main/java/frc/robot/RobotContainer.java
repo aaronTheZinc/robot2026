@@ -33,6 +33,8 @@ import frc.robot.subsystems.IntakeSubsystem;
 import frc.robot.subsystems.MotorTestSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.VisionMeasurement;
+import frc.robot.commands.RunShooterRightCommand;
+import frc.robot.commands.RunShooterLeftCommand;
 
 public class RobotContainer {
     private double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
@@ -161,8 +163,12 @@ public class RobotContainer {
         joystick.leftBumper().onTrue(drivetrain.runOnce(drivetrain::seedFieldCentric));
 
         // Intake (subsystems controller): pivot + roller + hopper
-        subsystems.a().whileTrue(new RunCommand(intake::intake, intake));
-        subsystems.b().whileTrue(new RunCommand(intake::outtake, intake));
+        // subsystems.a().whileTrue(new RunCommand(intake::intake, intake));
+        // subsystems.b().whileTrue(new RunCommand(intake::outtake, intake));
+
+        subsystems.a().whileTrue(new RunShooterRightCommand(shooter));
+        subsystems.b().whileTrue(new RunShooterLeftCommand(shooter));
+        
         subsystems.x().onTrue(intake.runOnce(intake::stow));
         subsystems.y().whileTrue(new RunCommand(intake::collect, intake));
         subsystems.rightBumper().whileTrue(new RunCommand(intake::feedToShooter, intake));

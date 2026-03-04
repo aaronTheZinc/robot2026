@@ -9,11 +9,11 @@ public final class IntakeConstants {
     private IntakeConstants() {}
 
     /** CAN ID for the pivot Spark MAX (up/down). */
-    public static final int kPivotId = 51;
+    public static final int kPivotId = 33;
     /** CAN ID for the roller Spark MAX (in/out). */
-    public static final int kRollerId = 52;
+    public static final int kRollerId = 31;
     /** CAN ID for the hopper Spark MAX (feeds shooter). */
-    public static final int kHopperId = 53;
+    public static final int kHopperId = 60;
 
     /** Pivot position (motor rotations) for stow (retracted). */
     public static final double kPivotStowRotations = 0.0;
@@ -35,7 +35,7 @@ public final class IntakeConstants {
     public static final double kRollerOuttakeSpeed = -0.8;
 
     /** Hopper speed [-1, 1] when feeding the shooter. */
-    public static final double kHopperFeedSpeed = 0.7;
+    public static final double kHopperFeedSpeed = -0.7;
 
     // ----- Motor test (all test speeds and inversion for intake motors in this file) -----
 
@@ -50,7 +50,7 @@ public final class IntakeConstants {
     public static final boolean kPivotTestDefaultInvert = false;
 
     /** Motor test: min/max normalized speed and default invert for hopper. */
-    public static final double kHopperTestMinSpeed = -1.0;
-    public static final double kHopperTestMaxSpeed = 1.0;
+    public static final double kHopperTestMinSpeed = 1.0;
+    public static final double kHopperTestMaxSpeed = -1.0;
     public static final boolean kHopperTestDefaultInvert = false;
 }
