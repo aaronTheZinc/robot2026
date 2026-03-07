@@ -1,3 +1,7 @@
+# Prevent nested repo in bot (would cause push/status to hang)
+bot/.git
+bot/.git/
+
 # macOS
 .DS_Store
 

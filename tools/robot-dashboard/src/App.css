@@ -571,6 +571,144 @@
   font-size: 0.9rem;
 }
 
+/* Motor Test view */
+.motor-test-view {
+  flex: 1;
+  min-height: 400px;
+}
+
+.motor-test-view .motor-test-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.motor-test-panel-compact .motor-test-section {
+  gap: 6px;
+}
+
+.motor-test-panel-compact .motor-test-section h3 {
+  font-size: 0.9rem;
+}
+
+.motor-test-panel-compact .motor-test-label {
+  min-width: 72px;
+  font-size: 0.8rem;
+}
+
+.motor-test-panel-compact .motor-test-btn {
+  padding: 5px 10px;
+  font-size: 0.75rem;
+}
+
+.motor-test-hint {
+  color: #9aa3c0;
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.motor-test-global {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.motor-test-global label {
+  font-size: 0.8rem;
+  color: #9aa3c0;
+}
+
+.motor-test-speed-input {
+  width: 80px;
+  background: #0c1222;
+  border: 1px solid #2d3b58;
+  color: #f6f7ff;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.motor-test-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.motor-test-section h3 {
+  margin: 0 0 4px 0;
+  font-size: 1rem;
+  color: #c2c8dd;
+}
+
+.motor-test-section h4.motor-test-subheading {
+  margin: 10px 0 4px 0;
+  font-size: 0.9rem;
+  color: #9aa3c0;
+  font-weight: 600;
+}
+
+.motor-test-motor {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.motor-test-label {
+  min-width: 100px;
+  font-size: 0.85rem;
+  color: #e2e6f0;
+}
+
+.motor-test-row {
+  display: flex;
+  gap: 8px;
+}
+
+.motor-test-btn {
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid #2c3a57;
+  background: #1a2234;
+  color: #f6f7ff;
+  transition: background 0.2s ease;
+}
+
+.motor-test-btn:hover {
+  background: #27344d;
+}
+
+.motor-test-btn.fwd {
+  background: rgba(64, 224, 155, 0.15);
+  border-color: #40e09b;
+  color: #40e09b;
+}
+
+.motor-test-btn.fwd:hover {
+  background: rgba(64, 224, 155, 0.25);
+}
+
+.motor-test-btn.rev {
+  background: rgba(255, 140, 140, 0.15);
+  border-color: #ff8c8c;
+  color: #ff8c8c;
+}
+
+.motor-test-btn.rev:hover {
+  background: rgba(255, 140, 140, 0.25);
+}
+
+.motor-test-btn.stop {
+  background: #20283b;
+  color: #cbd2e4;
+}
+
+.motor-test-btn.stop:hover {
+  background: #27344d;
+}
+
 /* KNN Grid view */
 .knn-grid-view {
   flex: 1;

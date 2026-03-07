@@ -4,12 +4,15 @@ import './App.css';
 import ChassisView from './components/ChassisView';
 import FieldView from './components/FieldView';
 import KnnGridView from './components/KnnGridView';
+import MotorTestPanel from './components/MotorTestPanel';
+import MotorTestView from './components/MotorTestView';
 import NetworkTableView from './components/NetworkTableView';
 import SimulationView from './components/SimulationView';
 import TurretView from './components/TurretView';
 import ConnectionScreen from './screens/ConnectionScreen';
 import type { ConnectionConfig, DashboardMode } from './screens/ConnectionScreen';
-import { connectRobotStateSubscription } from './lib/nt4Client';
+import { connectRobotStateSubscription, createMotorTestPublisher } from './lib/nt4Client';
+import type { MotorTestPublisher } from './lib/nt4Client';
 import {
   applyRobotStateUpdate,
   createInitialRobotState,
@@ -25,6 +28,7 @@ export type ViewTab =
   | 'dashboard'
   | 'turret'
   | 'chassis'
+  | 'motortest'
   | 'networktables'
   | 'knngrid'
   | 'simulation';
@@ -36,11 +40,12 @@ const DEBUG_TABS: ViewTab[] = [
   'dashboard',
   'turret',
   'chassis',
+  'motortest',
   'simulation',
   'networktables',
   'knngrid',
 ];
-const COMPETITION_TABS: ViewTab[] = ['dashboard', 'turret', 'simulation'];
+const COMPETITION_TABS: ViewTab[] = ['dashboard', 'turret', 'simulation', 'motortest'];
 const FIELD_LENGTH_M = 16.46;
 const FIELD_WIDTH_M = 8.23;
 
@@ -94,6 +99,7 @@ function App() {
   const lastRemainingRef = useRef(state.match.timeRemainingSec);
   const flashTimeoutRef = useRef<number | null>(null);
   const knnLogInputRef = useRef<HTMLInputElement | null>(null);
+  const motorTestPublisherRef = useRef<MotorTestPublisher | null>(null);
 
   const visibleTabs =
     dashboardMode === 'competition' ? COMPETITION_TABS : DEBUG_TABS;
@@ -200,6 +206,31 @@ function App() {
     });
     return () => subscription.disconnect();
   }, [mode, nt4Enabled, port, uri]);
+
+  useEffect(() => {
+    if (mode !== 'nt4' || !nt4Enabled || !state.connected) {
+      if (motorTestPublisherRef.current) {
+        motorTestPublisherRef.current.runMotor('', 0, false);
+      }
+      motorTestPublisherRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    createMotorTestPublisher(uri, port)
+      .then((pub) => {
+        if (!cancelled) motorTestPublisherRef.current = pub;
+      })
+      .catch(() => {
+        if (!cancelled) motorTestPublisherRef.current = null;
+      });
+    return () => {
+      cancelled = true;
+      if (motorTestPublisherRef.current) {
+        motorTestPublisherRef.current.runMotor('', 0, false);
+      }
+      motorTestPublisherRef.current = null;
+    };
+  }, [mode, nt4Enabled, state.connected, uri, port]);
 
   useEffect(() => {
     const remaining = state.match.timeRemainingSec;
@@ -319,7 +350,9 @@ function App() {
                 ? 'KNN Grid'
                 : tab === 'networktables'
                   ? 'Network Tables'
-                  : tab === 'simulation'
+                  : tab === 'motortest'
+                    ? 'Motor Test'
+                    : tab === 'simulation'
                     ? 'Simulation'
                     : tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
@@ -335,6 +368,17 @@ function App() {
             velocityMps={state.shooter.velocityMps}
           />
         </section>
+      )}
+
+      {viewTab === 'motortest' && (
+        <MotorTestView
+          uri={uri}
+          port={port}
+          connected={state.connected}
+          nt4Enabled={nt4Enabled}
+          mode={mode}
+          publisherRef={motorTestPublisherRef}
+        />
       )}
 
       {viewTab === 'networktables' && (
@@ -717,6 +761,14 @@ function App() {
             </button>
           </div>
         </div>
+
+        <MotorTestPanel
+          publisherRef={motorTestPublisherRef}
+          connected={state.connected}
+          nt4Enabled={nt4Enabled}
+          mode={mode}
+          compact
+        />
       </section>
       )}
     </div>

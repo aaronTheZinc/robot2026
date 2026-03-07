@@ -293,3 +293,43 @@ export function connectFullNetworkTableSubscription(
     },
   };
 }
+
+// --- Motor Test publisher (dashboard writes, robot reads) ---
+
+const MOTOR_TEST_ENABLE_PATH = 'MotorTest/Enable';
+const MOTOR_TEST_MOTOR_PATH = 'MotorTest/Motor';
+const MOTOR_TEST_SPEED_PATH = 'MotorTest/Speed';
+
+export type MotorTestPublisher = {
+  setEnable: (value: boolean) => void;
+  setMotor: (value: string) => void;
+  setSpeed: (value: number) => void;
+  runMotor: (motorId: string, speed: number, enable: boolean) => void;
+};
+
+/**
+ * Creates MotorTest NT topics, publishes so this client can set values, and returns setters.
+ * Call when connected (NT4 mode). Robot reads MotorTest/Enable, MotorTest/Motor, MotorTest/Speed.
+ */
+export async function createMotorTestPublisher(
+  uri: string,
+  port: number
+): Promise<MotorTestPublisher> {
+  const nt = NetworkTables.getInstanceByURI(uri, port);
+  const enableTopic = nt.createTopic(MOTOR_TEST_ENABLE_PATH, NetworkTablesTypeInfos.kBoolean, false as boolean);
+  const motorTopic = nt.createTopic(MOTOR_TEST_MOTOR_PATH, NetworkTablesTypeInfos.kString, '' as string);
+  const speedTopic = nt.createTopic(MOTOR_TEST_SPEED_PATH, NetworkTablesTypeInfos.kDouble, 0.15 as number);
+
+  await Promise.all([enableTopic.publish(), motorTopic.publish(), speedTopic.publish()]);
+
+  return {
+    setEnable: (value: boolean) => enableTopic.setValue(value),
+    setMotor: (value: string) => motorTopic.setValue(value),
+    setSpeed: (value: number) => speedTopic.setValue(value),
+    runMotor: (motorId: string, speed: number, enable: boolean) => {
+      motorTopic.setValue(motorId);
+      speedTopic.setValue(speed);
+      enableTopic.setValue(enable);
+    },
+  };
+}

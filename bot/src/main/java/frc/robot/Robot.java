@@ -11,7 +11,6 @@ import edu.wpi.first.net.PortForwarder;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
-import edu.wpi.first.wpilibj2.command.RunCommand;
 
 public class Robot extends TimedRobot {
     /** True when Driver Station is in Test mode; used to gate test bindings and motor test periodic. */
@@ -112,10 +111,6 @@ public class Robot extends TimedRobot {
     public void testInit() {
         s_inTestMode = true;
         CommandScheduler.getInstance().cancelAll();
-        // Block drive/intake defaults so only test bindings run
-        new RunCommand(() -> {}, m_robotContainer.drivetrain, m_robotContainer.getIntake())
-                .ignoringDisable(true)
-                .schedule();
     }
 
     @Override

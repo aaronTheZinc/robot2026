@@ -87,6 +87,11 @@ public class VisionMeasurement extends SubsystemBase {
     public void periodic() {
         publishLimelightToSmartDashboard();
 
+        // No vision pose fusion in teleop; chassis runs on encoder odometry only and is uninterrupted.
+        if (DriverStation.isTeleop()) {
+            return;
+        }
+
         var driveState = m_drivetrain.getState();
         double headingDeg = driveState.Pose.getRotation().getDegrees();
         double omegaRps = Units.radiansToRotations(driveState.Speeds.omegaRadiansPerSecond);
