@@ -17,7 +17,7 @@ public class HoodHomingCommand extends Command {
     private int stallCount;
 
     public HoodHomingCommand(ShooterSubsystem shooter) {
-        this.shooter = shooter;
+        this.shooter = shooter; 
         addRequirements(shooter);
     }
 

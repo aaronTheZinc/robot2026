@@ -86,7 +86,7 @@ public class RobotContainer {
         // Chassis default runs on drivetrain only; no vision requirement so teleop is uninterrupted.
         drivetrain.setDefaultCommand(driveCommand);
 
-        intake.setDefaultCommand(new RunCommand(intake::stow, intake));
+        // intake.setDefaultCommand(new RunCommand(intake::stow, intake));
 
         // Idle while the robot is disabled. This ensures the configured
         // neutral mode is applied to the drive motors while disabled.
