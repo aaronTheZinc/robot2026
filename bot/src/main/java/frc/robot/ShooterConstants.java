@@ -52,6 +52,25 @@ public final class ShooterConstants {
     /** Test speed [-1, 1] for shooter test commands (e.g. 0.25 for reduced testing). */
     public static final double kTestSpeed = 0.25;
 
+    // ----- Closed-loop shooter velocity (RPM) and dashboard increments -----
+
+    /** Minimum shooter wheel RPM setpoint (closed-loop). */
+    public static final double kShooterMinRpm = 0.0;
+    /** Maximum shooter wheel RPM setpoint (closed-loop). */
+    public static final double kShooterMaxRpm = 6000.0;
+    /** Default RPM setpoint when using velocity control (e.g. for testing). */
+    public static final double kShooterDefaultRpmSetpoint = 3000.0;
+
+    /** Shooter velocity PID gains (slot 0). Tune for your mechanism. */
+    public static final double kShooterKp = 0.15;
+    public static final double kShooterKi = 0.0;
+    public static final double kShooterKd = 0.01;
+
+    /** Dashboard: hood angle step in degrees for increment/decrement buttons. */
+    public static final double kHoodDegreesIncrement = 5.0;
+    /** Dashboard: shooter RPM step for increment/decrement buttons. */
+    public static final double kShooterRpmIncrement = 100.0;
+
     // ----- Motor test (all test speeds and inversion for shooter/hood in this file) -----
 
     /** Motor test: min/max normalized speed and default invert for left shooter. */

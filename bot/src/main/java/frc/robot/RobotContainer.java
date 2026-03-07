@@ -20,7 +20,12 @@ import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 
+import frc.robot.commands.DecrementHoodDegreesCommand;
+import frc.robot.commands.DecrementShooterRpmCommand;
 import frc.robot.commands.HoodHomingCommand;
+import frc.robot.commands.IncrementHoodDegreesCommand;
+import frc.robot.commands.IncrementShooterRpmCommand;
+import frc.robot.commands.ShootComamnd;
 import frc.robot.generated.TunerConstants;
 import frc.robot.knn.KnnInterpreter;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
@@ -28,7 +33,6 @@ import frc.robot.subsystems.IntakeSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.VisionMeasurement;
 import frc.robot.commands.RunShooterRightCommand;
-import frc.robot.commands.RunShooterLeftCommand;
 
 public class RobotContainer {
     private double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
@@ -61,6 +65,12 @@ public class RobotContainer {
     public RobotContainer() {
         autoChooser = AutoBuilder.buildAutoChooser("Tests");
         SmartDashboard.putData("Auto Mode", autoChooser);
+
+        // Debug: adjustable hood and shooter setpoints (run from SmartDashboard / robot dashboard)
+        SmartDashboard.putData("Debug/Increment Hood (deg)", new IncrementHoodDegreesCommand(shooter));
+        SmartDashboard.putData("Debug/Decrement Hood (deg)", new DecrementHoodDegreesCommand(shooter));
+        SmartDashboard.putData("Debug/Increment Shooter RPM", new IncrementShooterRpmCommand(shooter));
+        SmartDashboard.putData("Debug/Decrement Shooter RPM", new DecrementShooterRpmCommand(shooter));
 
         configureBindings();
     }
@@ -111,11 +121,11 @@ public class RobotContainer {
         // subsystems.a().whileTrue(new RunCommand(intake::intake, intake));
         // subsystems.b().whileTrue(new RunCommand(intake::outtake, intake));
 
-        subsystems.a().whileTrue(new RunShooterRightCommand(shooter));
-        subsystems.b().whileTrue(new RunShooterLeftCommand(shooter));
+        subsystems.a().whileTrue(new ShootComamnd(shooter));
+        subsystems.b().whileTrue(new RunShooterRightCommand(shooter));
         
-        subsystems.x().onTrue(intake.runOnce(intake::stow));
-        subsystems.y().whileTrue(new RunCommand(intake::collect, intake));
+        subsystems.x().whileTrue(new RunCommand(intake::intake, intake));
+        subsystems.y().whileTrue(new RunCommand(intake::feedToShooter, intake));
         subsystems.rightBumper().whileTrue(new RunCommand(intake::feedToShooter, intake));
         subsystems.leftBumper().onTrue(intake.runOnce(intake::stopAll));
 

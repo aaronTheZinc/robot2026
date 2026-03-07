@@ -333,3 +333,33 @@ export async function createMotorTestPublisher(
     },
   };
 }
+
+// --- Shooter setpoint publisher (dashboard sliders -> robot reads hoodSetpointInput / rpmSetpointInput) ---
+
+const SHOOTER_HOOD_SETPOINT_INPUT_PATH = 'Shooter/hoodSetpointInput';
+const SHOOTER_RPM_SETPOINT_INPUT_PATH = 'Shooter/rpmSetpointInput';
+
+export type ShooterSetpointPublisher = {
+  setHoodSetpoint: (degrees: number) => void;
+  setRpmSetpoint: (rpm: number) => void;
+};
+
+/**
+ * Creates NT topics for shooter/hood setpoint input. Robot reads these in periodic() and applies.
+ * Call when connected (NT4 mode).
+ */
+export async function createShooterSetpointPublisher(
+  uri: string,
+  port: number
+): Promise<ShooterSetpointPublisher> {
+  const nt = NetworkTables.getInstanceByURI(uri, port);
+  const hoodTopic = nt.createTopic(SHOOTER_HOOD_SETPOINT_INPUT_PATH, NetworkTablesTypeInfos.kDouble, 0 as number);
+  const rpmTopic = nt.createTopic(SHOOTER_RPM_SETPOINT_INPUT_PATH, NetworkTablesTypeInfos.kDouble, 0 as number);
+
+  await Promise.all([hoodTopic.publish(), rpmTopic.publish()]);
+
+  return {
+    setHoodSetpoint: (degrees: number) => hoodTopic.setValue(degrees),
+    setRpmSetpoint: (rpm: number) => rpmTopic.setValue(rpm),
+  };
+}

@@ -11,8 +11,12 @@ import SimulationView from './components/SimulationView';
 import TurretView from './components/TurretView';
 import ConnectionScreen from './screens/ConnectionScreen';
 import type { ConnectionConfig, DashboardMode } from './screens/ConnectionScreen';
-import { connectRobotStateSubscription, createMotorTestPublisher } from './lib/nt4Client';
-import type { MotorTestPublisher } from './lib/nt4Client';
+import {
+  connectRobotStateSubscription,
+  createMotorTestPublisher,
+  createShooterSetpointPublisher,
+} from './lib/nt4Client';
+import type { MotorTestPublisher, ShooterSetpointPublisher } from './lib/nt4Client';
 import {
   applyRobotStateUpdate,
   createInitialRobotState,
@@ -100,6 +104,7 @@ function App() {
   const flashTimeoutRef = useRef<number | null>(null);
   const knnLogInputRef = useRef<HTMLInputElement | null>(null);
   const motorTestPublisherRef = useRef<MotorTestPublisher | null>(null);
+  const shooterSetpointPublisherRef = useRef<ShooterSetpointPublisher | null>(null);
 
   const visibleTabs =
     dashboardMode === 'competition' ? COMPETITION_TABS : DEBUG_TABS;
@@ -213,15 +218,25 @@ function App() {
         motorTestPublisherRef.current.runMotor('', 0, false);
       }
       motorTestPublisherRef.current = null;
+      shooterSetpointPublisherRef.current = null;
       return;
     }
     let cancelled = false;
-    createMotorTestPublisher(uri, port)
-      .then((pub) => {
-        if (!cancelled) motorTestPublisherRef.current = pub;
+    Promise.all([
+      createMotorTestPublisher(uri, port),
+      createShooterSetpointPublisher(uri, port),
+    ])
+      .then(([motorPub, shooterPub]) => {
+        if (!cancelled) {
+          motorTestPublisherRef.current = motorPub;
+          shooterSetpointPublisherRef.current = shooterPub;
+        }
       })
       .catch(() => {
-        if (!cancelled) motorTestPublisherRef.current = null;
+        if (!cancelled) {
+          motorTestPublisherRef.current = null;
+          shooterSetpointPublisherRef.current = null;
+        }
       });
     return () => {
       cancelled = true;
@@ -229,6 +244,7 @@ function App() {
         motorTestPublisherRef.current.runMotor('', 0, false);
       }
       motorTestPublisherRef.current = null;
+      shooterSetpointPublisherRef.current = null;
     };
   }, [mode, nt4Enabled, state.connected, uri, port]);
 
@@ -683,25 +699,41 @@ function App() {
               </div>
             </div>
           </div>
-          <div className="control-row">
+          <div className="control-row control-row-slider">
             <label>RPM Setpoint</label>
-            <input
-              type="number"
-              value={state.shooter.rpmSetpoint}
-              onChange={(event) =>
-                applyUpdate({ shooter: { rpmSetpoint: Number(event.target.value) || 0 } })
-              }
-            />
+            <div className="slider-with-value">
+              <input
+                type="range"
+                min={0}
+                max={6000}
+                step={50}
+                value={state.shooter.rpmSetpoint}
+                onChange={(event) => {
+                  const val = Number(event.target.value) || 0;
+                  applyUpdate({ shooter: { rpmSetpoint: val } });
+                  shooterSetpointPublisherRef.current?.setRpmSetpoint(val);
+                }}
+              />
+              <span className="metric-value">{formatNumber(state.shooter.rpmSetpoint, 0)}</span>
+            </div>
           </div>
-          <div className="control-row">
+          <div className="control-row control-row-slider">
             <label>Hood Setpoint</label>
-            <input
-              type="number"
-              value={state.shooter.hoodSetpoint}
-              onChange={(event) =>
-                applyUpdate({ shooter: { hoodSetpoint: Number(event.target.value) || 0 } })
-              }
-            />
+            <div className="slider-with-value">
+              <input
+                type="range"
+                min={0}
+                max={90}
+                step={1}
+                value={state.shooter.hoodSetpoint}
+                onChange={(event) => {
+                  const val = Number(event.target.value) || 0;
+                  applyUpdate({ shooter: { hoodSetpoint: val } });
+                  shooterSetpointPublisherRef.current?.setHoodSetpoint(val);
+                }}
+              />
+              <span className="metric-value">{formatNumber(state.shooter.hoodSetpoint, 1)}°</span>
+            </div>
           </div>
           <div className="button-row">
             <button onClick={() => applyUpdate({ shooter: { enabled: !state.shooter.enabled } })}>

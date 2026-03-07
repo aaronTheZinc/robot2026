@@ -60,14 +60,16 @@ public class IntakeSubsystem extends SubsystemBase {
 
     /** Set pivot to stow position (retracted). */
     public void setPivotStow() {
-        pivotMotor.getClosedLoopController().setSetpoint(
-                IntakeConstants.kPivotStowRotations, ControlType.kPosition);
+        // pivotMotor.set(-1);
+        // pivotMotor.getClosedLoopController().setSetpoint(
+        //         IntakeConstants.kPivotStowRotations, ControlType.kPosition);
     }
 
     /** Set pivot to collect position (deployed to pick from floor). */
     public void setPivotCollect() {
-        pivotMotor.getClosedLoopController().setSetpoint(
-                IntakeConstants.kPivotCollectRotations, ControlType.kPosition);
+        // pivotMotor.set(0.3);
+        // pivotMotor.getClosedLoopController().setSetpoint(
+        //         IntakeConstants.kPivotCollectRotations, ControlType.kPosition);
     }
 
     /** Set pivot to intake position. */
