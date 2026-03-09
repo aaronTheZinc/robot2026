@@ -20,11 +20,14 @@ import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 
+import frc.robot.ShooterConstants;
 import frc.robot.commands.DecrementHoodDegreesCommand;
 import frc.robot.commands.DecrementShooterRpmCommand;
 import frc.robot.commands.HoodHomingCommand;
 import frc.robot.commands.IncrementHoodDegreesCommand;
 import frc.robot.commands.IncrementShooterRpmCommand;
+import frc.robot.commands.PivotToDeployCommand;
+import frc.robot.commands.PivotToStowCommand;
 import frc.robot.commands.ShootComamnd;
 import frc.robot.generated.TunerConstants;
 import frc.robot.knn.KnnInterpreter;
@@ -32,7 +35,6 @@ import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.IntakeSubsystem;
 import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.VisionMeasurement;
-import frc.robot.commands.RunShooterRightCommand;
 
 public class RobotContainer {
     private double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
@@ -117,17 +119,26 @@ public class RobotContainer {
         // Reset the field-centric heading on left bumper press.
         joystick.leftBumper().onTrue(drivetrain.runOnce(drivetrain::seedFieldCentric));
 
-        // Intake (subsystems controller): pivot + roller + hopper
-        // subsystems.a().whileTrue(new RunCommand(intake::intake, intake));
-        // subsystems.b().whileTrue(new RunCommand(intake::outtake, intake));
+        // Subsystems controller (1): triggers, bumpers, buttons, D-pad
+        subsystems.rightTrigger().whileTrue(new ShootComamnd(shooter, intake));
+        subsystems.leftTrigger().whileTrue(new RunCommand(intake::intake, intake));
 
-        subsystems.a().whileTrue(new ShootComamnd(shooter));
-        subsystems.b().whileTrue(new RunShooterRightCommand(shooter));
-        
-        subsystems.x().whileTrue(new RunCommand(intake::intake, intake));
-        subsystems.y().whileTrue(new RunCommand(intake::feedToShooter, intake));
-        subsystems.rightBumper().whileTrue(new RunCommand(intake::feedToShooter, intake));
-        subsystems.leftBumper().onTrue(intake.runOnce(intake::stopAll));
+        subsystems.y().onTrue(new PivotToStowCommand(intake));
+        subsystems.a().onTrue(new PivotToDeployCommand(intake));
+
+        subsystems.rightBumper().whileTrue(
+            new RunCommand(() -> shooter.setShooterVoltage(-ShooterConstants.kTestSpeed * ShooterConstants.kMaxVoltageVolts), shooter)
+                .finallyDo(() -> shooter.stopShooter()));
+        subsystems.leftBumper().whileTrue(
+            new RunCommand(intake::spitOut, intake).finallyDo(() -> {
+                intake.stopRoller();
+                intake.stopHopper();
+            }));
+
+        subsystems.povUp().onTrue(new IncrementHoodDegreesCommand(shooter));
+        subsystems.povDown().onTrue(new DecrementHoodDegreesCommand(shooter));
+        subsystems.povLeft().onTrue(new DecrementShooterRpmCommand(shooter));
+        subsystems.povRight().onTrue(new IncrementShooterRpmCommand(shooter));
 
         drivetrain.registerTelemetry(state -> {
             logger.telemeterize(state);

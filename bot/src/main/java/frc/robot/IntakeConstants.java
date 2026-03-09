@@ -36,6 +36,18 @@ public final class IntakeConstants {
 
     /** Hopper speed [-1, 1] when feeding the shooter. */
     public static final double kHopperFeedSpeed = -0.7;
+    /** Hopper speed [-1, 1] when spitting out (reverse feed). */
+    public static final double kHopperSpitOutSpeed = 0.7;
+
+    // ----- Pivot stall detection (mechanical stop for stow/deploy) -----
+    /** Normalized speed [-1, 1] for pivot moving toward stow (up). Positive = one direction. */
+    public static final double kPivotStowSpeed = 0.4;
+    /** Normalized speed [-1, 1] for pivot moving toward deploy (down). */
+    public static final double kPivotDeploySpeed = -0.4;
+    /** Output current (A) above which pivot is considered at mechanical stop. */
+    public static final double kPivotStallCurrentAmps = 25.0;
+    /** Consecutive cycles current must be above threshold to confirm stall. */
+    public static final int kPivotStallConfirmCycles = 5;
 
     // ----- Motor test (all test speeds and inversion for intake motors in this file) -----
 

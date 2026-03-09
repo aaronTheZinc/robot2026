@@ -34,6 +34,9 @@ public class IntakeSubsystem extends SubsystemBase {
 
     private final RelativeEncoder pivotEncoder = pivotMotor.getEncoder();
 
+    /** After stall-based travel: true = at stow (up), false = at deploy (down), null = unknown. */
+    private Boolean pivotStowed = null;
+
     public IntakeSubsystem() {
         var pivotConfig = new SparkMaxConfig()
                 .idleMode(SparkBaseConfig.IdleMode.kBrake)
@@ -120,6 +123,36 @@ public class IntakeSubsystem extends SubsystemBase {
         pivotMotor.set(Math.max(-1, Math.min(1, speed)));
     }
 
+    /** Run pivot toward stow (up) at configured speed. Used by stall-based command. */
+    public void setPivotTowardStow() {
+        pivotMotor.set(IntakeConstants.kPivotStowSpeed);
+    }
+
+    /** Run pivot toward deploy (down) at configured speed. Used by stall-based command. */
+    public void setPivotTowardDeploy() {
+        pivotMotor.set(IntakeConstants.kPivotDeploySpeed);
+    }
+
+    /** Stop pivot motor. */
+    public void stopPivot() {
+        pivotMotor.set(0);
+    }
+
+    /** Pivot output current in amps (for stall detection). */
+    public double getPivotOutputCurrentAmps() {
+        return pivotMotor.getOutputCurrent();
+    }
+
+    /** Whether pivot is considered at stow (true), deploy (false), or unknown (null). */
+    public Boolean isPivotStowed() {
+        return pivotStowed;
+    }
+
+    /** Mark pivot state after hitting mechanical stop (stow = true, deploy = false). */
+    public void setPivotStowed(Boolean stowed) {
+        pivotStowed = stowed;
+    }
+
     // ----- Hopper (feed to shooter) -----
 
     /** Run hopper to feed the shooter. */
@@ -136,7 +169,12 @@ public class IntakeSubsystem extends SubsystemBase {
      * Run hopper at normalized speed [-1, 1] for motor test (open-loop).
      */
     public void setHopperSpeed(double speed) {
-        hopperMotor.set(Math.max(1, Math.min(-1, speed)));
+        hopperMotor.set(Math.max(-1, Math.min(1, speed)));
+    }
+
+    /** Run hopper in reverse (spit out). */
+    public void runHopperSpitOut() {
+        hopperMotor.set(IntakeConstants.kHopperSpitOutSpeed);
     }
 
     // ----- Composite actions: intake, outtake, stow, collect -----
@@ -172,6 +210,12 @@ public class IntakeSubsystem extends SubsystemBase {
     /** Run hopper to feed shooter (e.g. when shooting). Call after intake has piece. */
     public void feedToShooter() {
         runHopper();
+    }
+
+    /** Spit out: roller and hopper run in reverse (left bumper). */
+    public void spitOut() {
+        runRollerOuttake();
+        runHopperSpitOut();
     }
 
     /** Stop roller, hopper, and pivot (e.g. for motor test). */
