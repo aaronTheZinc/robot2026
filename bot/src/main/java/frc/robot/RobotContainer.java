@@ -15,20 +15,13 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
-import edu.wpi.first.wpilibj2.command.RunCommand;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 
-import frc.robot.ShooterConstants;
-import frc.robot.commands.DecrementHoodDegreesCommand;
-import frc.robot.commands.DecrementShooterRpmCommand;
-import frc.robot.commands.HoodHomingCommand;
-import frc.robot.commands.IncrementHoodDegreesCommand;
-import frc.robot.commands.IncrementShooterRpmCommand;
-import frc.robot.commands.PivotToDeployCommand;
-import frc.robot.commands.PivotToStowCommand;
-import frc.robot.commands.ShootComamnd;
+import frc.robot.commands.IntakeCommands;
+import frc.robot.commands.ShooterCommands;
 import frc.robot.generated.TunerConstants;
 import frc.robot.knn.KnnInterpreter;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
@@ -60,6 +53,8 @@ public class RobotContainer {
     public final VisionMeasurement visionMeasurement = new VisionMeasurement(drivetrain);
     private final ShooterSubsystem shooter = new ShooterSubsystem();
     private final IntakeSubsystem intake = new IntakeSubsystem();
+    private final ShooterCommands shooterCommands = new ShooterCommands(shooter);
+    private final IntakeCommands intakeCommands = new IntakeCommands(intake);
 
     /* Path follower */
     private final SendableChooser<Command> autoChooser;
@@ -69,10 +64,10 @@ public class RobotContainer {
         SmartDashboard.putData("Auto Mode", autoChooser);
 
         // Debug: adjustable hood and shooter setpoints (run from SmartDashboard / robot dashboard)
-        SmartDashboard.putData("Debug/Increment Hood (deg)", new IncrementHoodDegreesCommand(shooter));
-        SmartDashboard.putData("Debug/Decrement Hood (deg)", new DecrementHoodDegreesCommand(shooter));
-        SmartDashboard.putData("Debug/Increment Shooter RPM", new IncrementShooterRpmCommand(shooter));
-        SmartDashboard.putData("Debug/Decrement Shooter RPM", new DecrementShooterRpmCommand(shooter));
+        SmartDashboard.putData("Debug/Increment Hood (deg)", shooterCommands.getIncrementHoodDegreesCommand());
+        SmartDashboard.putData("Debug/Decrement Hood (deg)", shooterCommands.getDecrementHoodDegreesCommand());
+        SmartDashboard.putData("Debug/Increment Shooter RPM", shooterCommands.getIncrementShooterRpmCommand());
+        SmartDashboard.putData("Debug/Decrement Shooter RPM", shooterCommands.getDecrementShooterRpmCommand());
 
         configureBindings();
     }
@@ -88,8 +83,6 @@ public class RobotContainer {
         // Chassis default runs on drivetrain only; no vision requirement so teleop is uninterrupted.
         drivetrain.setDefaultCommand(driveCommand);
 
-        // intake.setDefaultCommand(new RunCommand(intake::stow, intake));
-
         // Idle while the robot is disabled. This ensures the configured
         // neutral mode is applied to the drive motors while disabled.
         final var idle = new SwerveRequest.Idle();
@@ -99,7 +92,7 @@ public class RobotContainer {
 
         joystick.a().whileTrue(drivetrain.applyRequest(() -> brake));
         joystick.b().whileTrue(drivetrain.applyRequest(() ->
-            point.withModuleDirection(new Rotation2d(-joystick.getLeftY(), -joystick.getLeftX()))
+            point.withModuleDirection(new Rotation2d(-joystick.getLeftY(), joystick.getLeftX()))
         ));
 
         joystick.povUp().whileTrue(drivetrain.applyRequest(() ->
@@ -120,30 +113,33 @@ public class RobotContainer {
         joystick.leftBumper().onTrue(drivetrain.runOnce(drivetrain::seedFieldCentric));
 
         // Subsystems controller (1): triggers, bumpers, buttons, D-pad
-        subsystems.rightTrigger().whileTrue(new ShootComamnd(shooter, intake));
-        subsystems.leftTrigger().whileTrue(new RunCommand(intake::intake, intake));
+        subsystems.rightTrigger().whileTrue(
+            Commands.parallel(
+                shooterCommands.getRunShooterCommand(ShooterConstants.kTestSpeed),
+                Commands.sequence(
+                    intakeCommands.getStopHopperCommand(),
+                    Commands.waitSeconds(1.0),
+                    intakeCommands.getFeedToShooterCommand()
+                )
+            ).finallyDo(() -> intake.stopHopper())
+        );
+        subsystems.leftTrigger().whileTrue(intakeCommands.getIntakeCommand());
 
-        subsystems.y().onTrue(new PivotToStowCommand(intake));
-        subsystems.a().onTrue(new PivotToDeployCommand(intake));
+        subsystems.y().onTrue(intakeCommands.getPivotToStowCommand());
+        subsystems.a().onTrue(intakeCommands.getPivotToDeployCommand());
 
-        subsystems.rightBumper().whileTrue(
-            new RunCommand(() -> shooter.setShooterVoltage(-ShooterConstants.kTestSpeed * ShooterConstants.kMaxVoltageVolts), shooter)
-                .finallyDo(() -> shooter.stopShooter()));
-        subsystems.leftBumper().whileTrue(
-            new RunCommand(intake::spitOut, intake).finallyDo(() -> {
-                intake.stopRoller();
-                intake.stopHopper();
-            }));
+        subsystems.rightBumper().whileTrue(shooterCommands.getReverseShooterCommand());
+        subsystems.leftBumper().whileTrue(intakeCommands.getSpitOutCommand());
 
-        subsystems.povUp().onTrue(new IncrementHoodDegreesCommand(shooter));
-        subsystems.povDown().onTrue(new DecrementHoodDegreesCommand(shooter));
-        subsystems.povLeft().onTrue(new DecrementShooterRpmCommand(shooter));
-        subsystems.povRight().onTrue(new IncrementShooterRpmCommand(shooter));
+        subsystems.povUp().onTrue(shooterCommands.getIncrementHoodDegreesCommand());
+        subsystems.povDown().onTrue(shooterCommands.getDecrementHoodDegreesCommand());
+        subsystems.povLeft().onTrue(shooterCommands.getDecrementShooterRpmCommand());
+        subsystems.povRight().onTrue(shooterCommands.getIncrementShooterRpmCommand());
 
-        drivetrain.registerTelemetry(state -> {
-            logger.telemeterize(state);
-            knnInterpreter.update(state.Pose);
-        });
+        // drivetrain.registerTelemetry(state -> {
+        //     logger.telemeterize(state);
+        //     knnInterpreter.update(state.Pose);
+        // });
     }
 
     public Command getAutonomousCommand() {
@@ -161,6 +157,6 @@ public class RobotContainer {
 
     /** Hood homing for real robot; schedule when enabling (auto or teleop). */
     public Command getHoodHomingCommand() {
-        return new HoodHomingCommand(shooter);
+        return shooterCommands.getHoodHomingCommand();
     }
 }
