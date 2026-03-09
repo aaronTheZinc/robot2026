@@ -115,7 +115,7 @@ public class RobotContainer {
         // Subsystems controller (1): triggers, bumpers, buttons, D-pad
         subsystems.rightTrigger().whileTrue(
             Commands.parallel(
-                shooterCommands.getRunShooterCommand(ShooterConstants.kTestSpeed),
+                shooterCommands.getRunShooterCommand(shooter.getShooterRpm()),
                 Commands.sequence(
                     intakeCommands.getStopHopperCommand(),
                     Commands.waitSeconds(1.0),

@@ -29,8 +29,14 @@ public class ShooterCommands {
     }
 
     public Command getRunShooterCommand() {
+        return getRunShooterCommand(this.shooter.shooterRpmSetpoint);
+    }
+
+        public Command getRunShooterCommandTest() {
         return getRunShooterCommand(ShooterConstants.kTestSpeed);
     }
+
+    
 
     public Command getRunShooterCommand(double speed) {
         double clampedSpeed = Math.max(-1.0, Math.min(1.0, speed));
