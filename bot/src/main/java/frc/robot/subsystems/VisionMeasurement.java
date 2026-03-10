@@ -6,9 +6,13 @@ package frc.robot.subsystems;
 
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
+import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.math.util.Units;
+import edu.wpi.first.networktables.BooleanPublisher;
+import edu.wpi.first.networktables.DoubleArrayPublisher;
+import edu.wpi.first.networktables.NetworkTableInstance;
 import com.ctre.phoenix6.Utils;
 
 import edu.wpi.first.wpilibj.DriverStation;
@@ -43,6 +47,20 @@ public class VisionMeasurement extends SubsystemBase {
     private final CommandSwerveDrivetrain m_drivetrain;
     private final String m_limelightName;
     private final boolean m_useMegaTag2;
+    private final DoubleArrayPublisher m_dashboardPosePublisher = NetworkTableInstance.getDefault()
+        .getTable("Pose")
+        .getDoubleArrayTopic("robotPose")
+        .publish();
+    private final DoubleArrayPublisher m_limelightEstimatedPosePublisher = NetworkTableInstance.getDefault()
+        .getTable("Pose")
+        .getDoubleArrayTopic("limelightEstimatedPose")
+        .publish();
+    private final BooleanPublisher m_limelightEstimatedPoseValidPublisher = NetworkTableInstance.getDefault()
+        .getTable("Pose")
+        .getBooleanTopic("limelightEstimatedPoseValid")
+        .publish();
+    private final double[] m_dashboardPose = new double[3];
+    private final double[] m_limelightEstimatedPose = new double[3];
 
     /**
      * Creates a vision measurement subsystem that fuses the given Limelight with the drivetrain.
@@ -87,10 +105,8 @@ public class VisionMeasurement extends SubsystemBase {
     public void periodic() {
         publishLimelightToSmartDashboard();
 
-        // No vision pose fusion in teleop; chassis runs on encoder odometry only and is uninterrupted.
-        if (DriverStation.isTeleop()) {
-            return;
-        }
+        // Keep the dashboard pose live even when vision fusion is disabled or rejected.
+        publishDashboardPose(m_drivetrain.getState().Pose);
 
         var driveState = m_drivetrain.getState();
         double headingDeg = driveState.Pose.getRotation().getDegrees();
@@ -103,6 +119,19 @@ public class VisionMeasurement extends SubsystemBase {
         );
 
         PoseEstimate estimate = getPoseEstimateForAlliance();
+        if (estimate != null
+                && LimelightHelpers.validPoseEstimate(estimate)
+                && estimate.tagCount >= kMinTagCount) {
+            publishLimelightEstimatedPose(estimate.pose);
+        } else {
+            publishLimelightEstimatedPoseInvalid();
+        }
+
+        // No vision pose fusion in teleop; chassis runs on encoder odometry only and is uninterrupted.
+        if (DriverStation.isTeleop()) {
+            return;
+        }
+
         if (estimate == null || !LimelightHelpers.validPoseEstimate(estimate)) {
             return;
         }
@@ -119,6 +148,8 @@ public class VisionMeasurement extends SubsystemBase {
             estimate.timestampSeconds,
             stdDevs
         );
+
+        publishDashboardPose(m_drivetrain.getState().Pose);
     }
 
     private static final int kLogThrottlePeriods = 100;
@@ -199,5 +230,24 @@ public class VisionMeasurement extends SubsystemBase {
                 ? LimelightHelpers.getBotPoseEstimate_wpiRed(m_limelightName)
                 : LimelightHelpers.getBotPoseEstimate_wpiBlue(m_limelightName);
         }
+    }
+
+    private void publishDashboardPose(Pose2d pose) {
+        m_dashboardPose[0] = pose.getX();
+        m_dashboardPose[1] = pose.getY();
+        m_dashboardPose[2] = pose.getRotation().getDegrees();
+        m_dashboardPosePublisher.set(m_dashboardPose);
+    }
+
+    private void publishLimelightEstimatedPose(Pose2d pose) {
+        m_limelightEstimatedPose[0] = pose.getX();
+        m_limelightEstimatedPose[1] = pose.getY();
+        m_limelightEstimatedPose[2] = pose.getRotation().getDegrees();
+        m_limelightEstimatedPosePublisher.set(m_limelightEstimatedPose);
+        m_limelightEstimatedPoseValidPublisher.set(true);
+    }
+
+    private void publishLimelightEstimatedPoseInvalid() {
+        m_limelightEstimatedPoseValidPublisher.set(false);
     }
 }

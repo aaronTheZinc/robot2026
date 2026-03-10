@@ -84,6 +84,30 @@ const DEFAULT_TOPICS: TopicConfig[] = [
     },
   },
   {
+    path: '/Pose/limelightEstimatedPose',
+    type: NetworkTablesTypeInfos.kDoubleArray,
+    defaultValue: [0, 0, 0],
+    map: (value) => {
+      if (!Array.isArray(value) || value.length < 3) {
+        return null;
+      }
+      return {
+        visionPose: {
+          x: Number(value[0]) || 0,
+          y: Number(value[1]) || 0,
+          headingDeg: Number(value[2]) || 0,
+        },
+      };
+    },
+  },
+  {
+    path: '/Pose/limelightEstimatedPoseValid',
+    type: NetworkTablesTypeInfos.kBoolean,
+    defaultValue: false,
+    map: (value) =>
+      typeof value === 'boolean' ? { visionPose: { valid: value } } : null,
+  },
+  {
     path: '/Swerve/fieldRelative',
     type: NetworkTablesTypeInfos.kBoolean,
     defaultValue: true,
@@ -173,6 +197,27 @@ const DEFAULT_TOPICS: TopicConfig[] = [
     defaultValue: 0,
     map: (value) =>
       typeof value === 'number' ? { shooter: { velocityMps: value } } : null,
+  },
+  {
+    path: '/Shooter/hoodCurrentAmps',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { shooter: { hoodCurrentAmps: value } } : null,
+  },
+  {
+    path: '/Shooter/leftCurrentAmps',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { shooter: { leftCurrentAmps: value } } : null,
+  },
+  {
+    path: '/Shooter/rightCurrentAmps',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { shooter: { rightCurrentAmps: value } } : null,
   },
   {
     path: '/Localization/targets',

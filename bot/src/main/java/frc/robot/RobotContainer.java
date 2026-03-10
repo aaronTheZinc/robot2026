@@ -82,6 +82,7 @@ public class RobotContainer {
         );
         // Chassis default runs on drivetrain only; no vision requirement so teleop is uninterrupted.
         drivetrain.setDefaultCommand(driveCommand);
+    
 
         // Idle while the robot is disabled. This ensures the configured
         // neutral mode is applied to the drive motors while disabled.
@@ -115,7 +116,7 @@ public class RobotContainer {
         // Subsystems controller (1): triggers, bumpers, buttons, D-pad
         subsystems.rightTrigger().whileTrue(
             Commands.parallel(
-                shooterCommands.getRunShooterCommand(shooter.getShooterRpm()),
+                shooterCommands.getRunShooterCommand(),
                 Commands.sequence(
                     intakeCommands.getStopHopperCommand(),
                     Commands.waitSeconds(1.0),
@@ -136,10 +137,10 @@ public class RobotContainer {
         subsystems.povLeft().onTrue(shooterCommands.getDecrementShooterRpmCommand());
         subsystems.povRight().onTrue(shooterCommands.getIncrementShooterRpmCommand());
 
-        // drivetrain.registerTelemetry(state -> {
-        //     logger.telemeterize(state);
-        //     knnInterpreter.update(state.Pose);
-        // });
+        drivetrain.registerTelemetry(state -> {
+            logger.telemeterize(state);
+            // knnInterpreter.update(state.Pose);
+        });
     }
 
     public Command getAutonomousCommand() {

@@ -9,7 +9,6 @@ import static edu.wpi.first.units.Units.Amps;
 import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
 import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.configs.Slot0Configs;
-import com.ctre.phoenix6.controls.PositionVoltage;
 import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.controls.VoltageOut;
 import com.ctre.phoenix6.hardware.TalonFX;
@@ -37,7 +36,7 @@ public class ShooterSubsystem extends SubsystemBase {
             new TalonFX(ShooterConstants.kHoodMotorId, TunerConstants.kCANBus);
 
     private final VoltageOut shooterRequest = new VoltageOut(0);
-    private final PositionVoltage hoodPositionRequest = new PositionVoltage(0);
+    private final VoltageOut hoodVoltageRequest = new VoltageOut(0);
     private final VelocityVoltage shooterVelocityRequest = new VelocityVoltage(0);
 
     /** True after hood has touched the mechanical stop (real) or sim has "ready" (sim). */
@@ -45,6 +44,8 @@ public class ShooterSubsystem extends SubsystemBase {
 
     /** Stored hood angle setpoint in degrees (for dashboard increment/decrement). */
     private double hoodSetpointDeg = ShooterConstants.kHoodMinAngleDeg;
+    /** Last hood voltage command sent to the motor controller. */
+    private double hoodCommandVolts = 0;
 
     /** Stored shooter RPM setpoint; 0 means open-loop / stopped. */
     private double shooterRpmSetpoint = 0;
@@ -79,17 +80,15 @@ public class ShooterSubsystem extends SubsystemBase {
 
 
 
-        // Hood: PID slot for position control, current limit, brake when idle
-        var hoodSlot0 = new Slot0Configs()
-                .withKP(ShooterConstants.kHoodKp)
-                .withKI(ShooterConstants.kHoodKi)
-                .withKD(ShooterConstants.kHoodKd);
-        hoodMotor.getConfigurator().apply(hoodSlot0);
+        // Hood: current limit and brake when idle. Angle hold is handled in software
+        // using a voltage proportional to angle error.
         var hoodCurrentLimits = new CurrentLimitsConfigs()
                 .withStatorCurrentLimit(Amps.of(ShooterConstants.kHoodStatorCurrentLimitAmps))
                 .withStatorCurrentLimitEnable(true);
         hoodMotor.getConfigurator().apply(hoodCurrentLimits);
-        var hoodOutput = new MotorOutputConfigs().withNeutralMode(NeutralModeValue.Brake);
+        var hoodOutput = new MotorOutputConfigs()
+                .withNeutralMode(NeutralModeValue.Brake)
+                .withInverted(InvertedValue.Clockwise_Positive);
         hoodMotor.getConfigurator().apply(hoodOutput);
 
         // Shooter wheels: slot 0 for velocity PID (closed-loop RPM)
@@ -165,16 +164,17 @@ public class ShooterSubsystem extends SubsystemBase {
 
     /**
      * Set hood setpoint to the given angle in degrees. Subsystem holds that angle using
-     * position closed-loop. Angle is clamped to [kHoodMinAngleDeg, kHoodMaxAngleDeg].
+     * a voltage proportional to angle error. Angle is clamped to the configured range.
      */
     public void setHoodAngle(double degrees) {
-        double clamped =
-                Math.max(
-                        ShooterConstants.kHoodMinAngleDeg,
-                        Math.min(ShooterConstants.kHoodMaxAngleDeg, degrees));
-        hoodSetpointDeg = clamped;
-        double rotations = clamped / ShooterConstants.kHoodDegreesPerMotorRev;
-        hoodMotor.setControl(hoodPositionRequest.withPosition(rotations));
+        hoodSetpointDeg = Math.max(
+                ShooterConstants.kHoodMinAngleDeg,
+                Math.min(ShooterConstants.kHoodMaxAngleDeg, degrees));
+        if (shooterReady) {
+            applyHoodPositionVoltage();
+        } else {
+            stopHood();
+        }
     }
 
     /** Current hood angle setpoint in degrees. */
@@ -197,7 +197,8 @@ public class ShooterSubsystem extends SubsystemBase {
     /** Run hood motor at normalized speed (open-loop). Speed in [-1, 1], mapped to voltage. */
     public void setHoodSpeed(double speed) {
         double volts = Math.max(-1, Math.min(1, speed)) * ShooterConstants.kMaxVoltageVolts;
-        hoodMotor.setControl(shooterRequest.withOutput(volts));
+        hoodCommandVolts = volts;
+        hoodMotor.setControl(hoodVoltageRequest.withOutput(volts));
     }
 
     /** Get current hood angle in degrees from integrated encoder. */
@@ -208,19 +209,29 @@ public class ShooterSubsystem extends SubsystemBase {
 
     /** Stop hood motor (voltage 0). */
     public void stopHood() {
-        hoodMotor.setControl(shooterRequest.withOutput(0));
+        hoodCommandVolts = 0;
+        hoodMotor.setControl(hoodVoltageRequest.withOutput(0));
     }
 
-    /** Run hood at a fixed voltage (e.g. for homing). Use negative to run toward mechanical stop. */
+    /** Run hood at a fixed voltage (e.g. for homing). Negative drives toward mechanical stop / hood down. */
     public void setHoodVoltage(double volts) {
         double clamped = Math.max(-ShooterConstants.kMaxVoltageVolts,
                 Math.min(ShooterConstants.kMaxVoltageVolts, volts));
-        hoodMotor.setControl(shooterRequest.withOutput(clamped));
+        hoodCommandVolts = clamped;
+        hoodMotor.setControl(hoodVoltageRequest.withOutput(clamped));
     }
 
     /** Current through hood motor stator (A). Used for stall detection during homing. */
     public double getHoodStatorCurrentAmps() {
         return hoodMotor.getStatorCurrent().getValueAsDouble();
+    }
+
+    public double getShooterLeftStatorCurrentAmps() {
+        return shooterLeft.getStatorCurrent().getValueAsDouble();
+    }
+
+    public double getShooterRightStatorCurrentAmps() {
+        return shooterRight.getStatorCurrent().getValueAsDouble();
     }
 
     /** Whether the hood has been homed this enable and shooter is ready to use. */
@@ -231,11 +242,42 @@ public class ShooterSubsystem extends SubsystemBase {
     /** Set by homing command when limit is touched; cleared when disabled. */
     public void setShooterReady(boolean ready) {
         shooterReady = ready;
+        if (!ready) {
+            stopHood();
+        }
     }
 
     /** Zero the hood position (call when at mechanical stop after homing). */
     public void zeroHoodPosition() {
         hoodMotor.setPosition(0);
+        hoodSetpointDeg = 0;
+        hoodSliderEntry.setDouble(hoodSetpointDeg);
+    }
+
+    private void applyHoodPositionVoltage() {
+        if (!shooterReady) {
+            stopHood();
+            return;
+        }
+
+        double errorDeg = getHoodAngleErrorDegrees();
+
+        if (Math.abs(errorDeg) <= ShooterConstants.kHoodAngleToleranceDeg) {
+            hoodCommandVolts = 0;
+            hoodMotor.setControl(hoodVoltageRequest.withOutput(0));
+            return;
+        }
+
+        double volts = errorDeg * ShooterConstants.kHoodAngleErrorVoltsPerDeg;
+        double clampedVolts = Math.max(
+                -ShooterConstants.kHoodAngleControlMaxVoltageVolts,
+                Math.min(ShooterConstants.kHoodAngleControlMaxVoltageVolts, volts));
+        hoodCommandVolts = clampedVolts;
+        hoodMotor.setControl(hoodVoltageRequest.withOutput(clampedVolts));
+    }
+
+    private double getHoodAngleErrorDegrees() {
+        return hoodSetpointDeg - getHoodAngleDegrees();
     }
 
     @Override
@@ -257,6 +299,8 @@ public class ShooterSubsystem extends SubsystemBase {
         SmartDashboard.putBoolean("Shooter Ready", shooterReady);
         SmartDashboard.putNumber("Hood Angle (deg)", getHoodAngleDegrees());
         SmartDashboard.putNumber("Hood Setpoint (deg)", hoodSetpointDeg);
+        SmartDashboard.putNumber("Hood Error (deg)", getHoodAngleErrorDegrees());
+        SmartDashboard.putNumber("Hood Command Voltage (V)", hoodCommandVolts);
         SmartDashboard.putNumber("Shooter RPM", getShooterRpm());
         SmartDashboard.putNumber("Shooter RPM Setpoint", shooterRpmSetpoint);
 
@@ -265,5 +309,9 @@ public class ShooterSubsystem extends SubsystemBase {
         shooterTable.getEntry("rpmSetpoint").setDouble(shooterRpmSetpoint);
         shooterTable.getEntry("hoodDeg").setDouble(getHoodAngleDegrees());
         shooterTable.getEntry("hoodSetpoint").setDouble(hoodSetpointDeg);
+        shooterTable.getEntry("hoodPitchDeg").setDouble(getHoodAngleDegrees());
+        shooterTable.getEntry("hoodCurrentAmps").setDouble(getHoodStatorCurrentAmps());
+        shooterTable.getEntry("leftCurrentAmps").setDouble(getShooterLeftStatorCurrentAmps());
+        shooterTable.getEntry("rightCurrentAmps").setDouble(getShooterRightStatorCurrentAmps());
     }
 }

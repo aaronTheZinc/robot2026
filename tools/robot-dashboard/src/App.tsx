@@ -52,6 +52,33 @@ const DEBUG_TABS: ViewTab[] = [
 const COMPETITION_TABS: ViewTab[] = ['dashboard', 'turret', 'simulation', 'motortest'];
 const FIELD_LENGTH_M = 16.46;
 const FIELD_WIDTH_M = 8.23;
+const CURRENT_HISTORY_LIMIT = 90;
+
+type CurrentHistory = {
+  hood: number[];
+  left: number[];
+  right: number[];
+};
+
+function pushHistory(values: number[], nextValue: number): number[] {
+  const clampedValue = Number.isFinite(nextValue) ? Math.max(0, nextValue) : 0;
+  const next = [...values, clampedValue];
+  return next.length > CURRENT_HISTORY_LIMIT ? next.slice(next.length - CURRENT_HISTORY_LIMIT) : next;
+}
+
+function buildSparklinePoints(values: number[], width: number, height: number, maxValue: number): string {
+  if (values.length === 0) {
+    return '';
+  }
+  const denominator = Math.max(values.length - 1, 1);
+  return values
+    .map((value, index) => {
+      const x = (index / denominator) * width;
+      const y = height - (Math.max(0, value) / Math.max(maxValue, 1)) * height;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+}
 
 function formatNumber(value: number, digits = 1): string {
   return value.toFixed(digits);
@@ -59,6 +86,49 @@ function formatNumber(value: number, digits = 1): string {
 
 function formatSeconds(value: number): string {
   return `${Math.max(0, Math.round(value))}s`;
+}
+
+function CurrentTrace({
+  label,
+  color,
+  value,
+  values,
+  maxValue,
+}: {
+  label: string;
+  color: string;
+  value: number;
+  values: number[];
+  maxValue: number;
+}) {
+  const width = 220;
+  const height = 54;
+  const points = buildSparklinePoints(values, width, height, maxValue);
+
+  return (
+    <div className="current-trace">
+      <div className="current-trace-header">
+        <span className="current-trace-label">
+          <span className="current-trace-swatch" style={{ backgroundColor: color }} />
+          {label}
+        </span>
+        <span className="current-trace-value">{formatNumber(value, 1)} A</span>
+      </div>
+      <svg className="current-trace-chart" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+        <polyline className="current-trace-grid" points={`0,${height - 1} ${width},${height - 1}`} />
+        {points && (
+          <polyline
+            points={points}
+            fill="none"
+            stroke={color}
+            strokeWidth="2.5"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        )}
+      </svg>
+    </div>
+  );
 }
 
 function getStoredUri(): string {
@@ -99,6 +169,11 @@ function App() {
   const [state, setState] = useState(() => createInitialRobotState('mock'));
   const [robotDims, setRobotDims] = useState({ lengthM: 0.9, widthM: 0.8 });
   const [loggedPoints, setLoggedPoints] = useState<{ x: number; y: number }[]>([]);
+  const [shooterCurrentHistory, setShooterCurrentHistory] = useState<CurrentHistory>({
+    hood: [0],
+    left: [0],
+    right: [0],
+  });
   const [milestoneFlash, setMilestoneFlash] = useState<'flash-30' | 'flash-15' | 'flash-10' | ''>('');
   const lastRemainingRef = useRef(state.match.timeRemainingSec);
   const flashTimeoutRef = useRef<number | null>(null);
@@ -273,6 +348,29 @@ function App() {
     };
   }, [state.match.timeRemainingSec]);
 
+  useEffect(() => {
+    setShooterCurrentHistory((prev) => ({
+      hood: pushHistory(prev.hood, state.shooter.hoodCurrentAmps),
+      left: pushHistory(prev.left, state.shooter.leftCurrentAmps),
+      right: pushHistory(prev.right, state.shooter.rightCurrentAmps),
+    }));
+  }, [
+    state.shooter.hoodCurrentAmps,
+    state.shooter.leftCurrentAmps,
+    state.shooter.rightCurrentAmps,
+  ]);
+
+  const shooterCurrentMax = useMemo(
+    () =>
+      Math.max(
+        5,
+        ...shooterCurrentHistory.hood,
+        ...shooterCurrentHistory.left,
+        ...shooterCurrentHistory.right
+      ),
+    [shooterCurrentHistory]
+  );
+
   if (!connectionScreenDone) {
     return (
       <ConnectionScreen
@@ -431,6 +529,10 @@ function App() {
             poseX={state.swerve.x}
             poseY={state.swerve.y}
             headingDeg={state.swerve.headingDeg}
+            visionPoseX={state.visionPose.x}
+            visionPoseY={state.visionPose.y}
+            visionHeadingDeg={state.visionPose.headingDeg}
+            visionPoseVisible={state.visionPose.valid}
             speedMps={state.swerve.speedMps}
             fieldRelative={state.swerve.fieldRelative}
             targets={state.targets}
@@ -530,6 +632,10 @@ function App() {
             poseX={state.swerve.x}
             poseY={state.swerve.y}
             headingDeg={state.swerve.headingDeg}
+            visionPoseX={state.visionPose.x}
+            visionPoseY={state.visionPose.y}
+            visionHeadingDeg={state.visionPose.headingDeg}
+            visionPoseVisible={state.visionPose.valid}
             loggedPoints={loggedPoints}
           />
           {isDebug && (
@@ -620,6 +726,22 @@ function App() {
                 {formatNumber(state.swerve.speedMps, 1)} m/s
               </div>
             </div>
+            <div>
+              <div className="metric-label">LL Pose</div>
+              <div className="metric-value">
+                {state.visionPose.valid
+                  ? `${formatNumber(state.visionPose.x, 2)}, ${formatNumber(state.visionPose.y, 2)}`
+                  : 'No target'}
+              </div>
+            </div>
+            <div>
+              <div className="metric-label">LL Heading</div>
+              <div className="metric-value">
+                {state.visionPose.valid
+                  ? `${formatNumber(state.visionPose.headingDeg, 1)}°`
+                  : '--'}
+              </div>
+            </div>
           </div>
           <div className="button-row">
             <button onClick={() => applyUpdate({ swerve: { headingDeg: 0 } })}>
@@ -697,6 +819,53 @@ function App() {
               <div className="metric-value">
                 {formatNumber(state.shooter.hoodSetpoint, 1)}°
               </div>
+            </div>
+            <div>
+              <div className="metric-label">Hood Current</div>
+              <div className="metric-value">
+                {formatNumber(state.shooter.hoodCurrentAmps, 1)} A
+              </div>
+            </div>
+            <div>
+              <div className="metric-label">Left Motor Current</div>
+              <div className="metric-value">
+                {formatNumber(state.shooter.leftCurrentAmps, 1)} A
+              </div>
+            </div>
+            <div>
+              <div className="metric-label">Right Motor Current</div>
+              <div className="metric-value">
+                {formatNumber(state.shooter.rightCurrentAmps, 1)} A
+              </div>
+            </div>
+          </div>
+          <div className="current-plot-card">
+            <div className="current-plot-header">
+              <div className="metric-label">Current Plot</div>
+              <div className="current-plot-scale">0-{formatNumber(shooterCurrentMax, 0)} A</div>
+            </div>
+            <div className="current-trace-list">
+              <CurrentTrace
+                label="Hood"
+                color="#f59e0b"
+                value={state.shooter.hoodCurrentAmps}
+                values={shooterCurrentHistory.hood}
+                maxValue={shooterCurrentMax}
+              />
+              <CurrentTrace
+                label="Left Motor"
+                color="#22c55e"
+                value={state.shooter.leftCurrentAmps}
+                values={shooterCurrentHistory.left}
+                maxValue={shooterCurrentMax}
+              />
+              <CurrentTrace
+                label="Right Motor"
+                color="#3b82f6"
+                value={state.shooter.rightCurrentAmps}
+                values={shooterCurrentHistory.right}
+                maxValue={shooterCurrentMax}
+              />
             </div>
           </div>
           <div className="control-row control-row-slider">

@@ -181,14 +181,14 @@ public class IntakeSubsystem extends SubsystemBase {
 
     /** Intake: pivot to intake position, run roller in, hopper off (or run if feeding). */
     public void intake() {
-        setPivotIntake();
+        // setPivotIntake();
         runRollerIntake();
         stopHopper();
     }
 
     /** Outtake: pivot to outtake position, run roller out, hopper off. */
     public void outtake() {
-        setPivotOuttake();
+        // setPivotOuttake();
         runRollerOuttake();
         stopHopper();
     }

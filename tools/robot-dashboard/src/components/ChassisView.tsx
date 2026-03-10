@@ -11,6 +11,10 @@ type ChassisViewProps = {
   poseX: number;
   poseY: number;
   headingDeg: number;
+  visionPoseX?: number;
+  visionPoseY?: number;
+  visionHeadingDeg?: number;
+  visionPoseVisible?: boolean;
   speedMps: number;
   fieldRelative: boolean;
   targets: { x: number; y: number }[];
@@ -25,6 +29,10 @@ export default function ChassisView({
   poseX,
   poseY,
   headingDeg,
+  visionPoseX,
+  visionPoseY,
+  visionHeadingDeg,
+  visionPoseVisible = false,
   speedMps,
   fieldRelative,
   targets,
@@ -34,6 +42,7 @@ export default function ChassisView({
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const robotRef = useRef<THREE.Mesh | null>(null);
+  const visionRobotRef = useRef<THREE.Mesh | null>(null);
   const targetsRef = useRef<THREE.Group | null>(null);
   const loggedPointsRef = useRef<THREE.Group | null>(null);
   const animationRef = useRef<number | null>(null);
@@ -100,6 +109,18 @@ export default function ChassisView({
     robot.position.y = ROBOT_HEIGHT_M / 2;
     scene.add(robot);
 
+    const visionRobotMaterial = new THREE.MeshStandardMaterial({
+      color: '#f97316',
+      transparent: true,
+      opacity: 0.45,
+      metalness: 0.1,
+      roughness: 0.5,
+    });
+    const visionRobot = new THREE.Mesh(robotGeometry.clone(), visionRobotMaterial);
+    visionRobot.position.y = ROBOT_HEIGHT_M / 2 + 0.01;
+    visionRobot.visible = false;
+    scene.add(visionRobot);
+
     const headingArrow = new THREE.ArrowHelper(
       new THREE.Vector3(1, 0, 0),
       new THREE.Vector3(0, ROBOT_HEIGHT_M / 2 + 0.01, 0),
@@ -107,6 +128,14 @@ export default function ChassisView({
       0xffd166
     );
     robot.add(headingArrow);
+
+    const visionHeadingArrow = new THREE.ArrowHelper(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, ROBOT_HEIGHT_M / 2 + 0.01, 0),
+      Math.max(robotLengthM, robotWidthM) * 0.6,
+      0xf97316
+    );
+    visionRobot.add(visionHeadingArrow);
 
     const targetsGroup = new THREE.Group();
     scene.add(targetsGroup);
@@ -133,6 +162,7 @@ export default function ChassisView({
     sceneRef.current = scene;
     cameraRef.current = camera;
     robotRef.current = robot;
+    visionRobotRef.current = visionRobot;
     targetsRef.current = targetsGroup;
     loggedPointsRef.current = loggedPointsGroup;
 
@@ -148,6 +178,8 @@ export default function ChassisView({
       borderMaterial.dispose();
       robotGeometry.dispose();
       robotMaterial.dispose();
+      visionRobot.geometry.dispose();
+      visionRobotMaterial.dispose();
       scene.clear();
       if (renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
@@ -164,6 +196,25 @@ export default function ChassisView({
     robot.position.z = clampedY - fieldWidthM / 2;
     robot.rotation.y = THREE.MathUtils.degToRad(headingDeg);
   }, [fieldLengthM, fieldWidthM, headingDeg, poseX, poseY]);
+
+  useEffect(() => {
+    const visionRobot = visionRobotRef.current;
+    if (!visionRobot) return;
+    visionRobot.visible = visionPoseVisible;
+    if (!visionPoseVisible) return;
+    const clampedX = THREE.MathUtils.clamp(visionPoseX ?? 0, 0, fieldLengthM);
+    const clampedY = THREE.MathUtils.clamp(visionPoseY ?? 0, 0, fieldWidthM);
+    visionRobot.position.x = clampedX - fieldLengthM / 2;
+    visionRobot.position.z = clampedY - fieldWidthM / 2;
+    visionRobot.rotation.y = THREE.MathUtils.degToRad(visionHeadingDeg ?? 0);
+  }, [
+    fieldLengthM,
+    fieldWidthM,
+    visionHeadingDeg,
+    visionPoseVisible,
+    visionPoseX,
+    visionPoseY,
+  ]);
 
   useEffect(() => {
     const group = targetsRef.current;
@@ -267,6 +318,14 @@ export default function ChassisView({
         <div className="metric-row">
           <span className="metric-label">KNN points</span>
           <span className="metric-value">{(loggedPoints ?? []).length}</span>
+        </div>
+        <div className="metric-row">
+          <span className="metric-label">LL pose</span>
+          <span className="metric-value">
+            {visionPoseVisible
+              ? `${(visionPoseX ?? 0).toFixed(2)}, ${(visionPoseY ?? 0).toFixed(2)}`
+              : 'No target'}
+          </span>
         </div>
       </div>
     </div>

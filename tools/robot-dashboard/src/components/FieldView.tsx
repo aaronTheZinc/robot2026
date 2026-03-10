@@ -9,6 +9,10 @@ type FieldViewProps = {
   poseX: number;
   poseY: number;
   headingDeg: number;
+  visionPoseX?: number;
+  visionPoseY?: number;
+  visionHeadingDeg?: number;
+  visionPoseVisible?: boolean;
   loggedPoints?: { x: number; y: number }[];
 };
 
@@ -22,6 +26,10 @@ export default function FieldView({
   poseX,
   poseY,
   headingDeg,
+  visionPoseX,
+  visionPoseY,
+  visionHeadingDeg,
+  visionPoseVisible = false,
   loggedPoints,
 }: FieldViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -29,6 +37,7 @@ export default function FieldView({
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const robotRef = useRef<THREE.Mesh | null>(null);
+  const visionRobotRef = useRef<THREE.Mesh | null>(null);
   const loggedPointsRef = useRef<THREE.Group | null>(null);
   const animationRef = useRef<number | null>(null);
 
@@ -94,6 +103,18 @@ export default function FieldView({
     robot.position.y = ROBOT_HEIGHT_M / 2;
     scene.add(robot);
 
+    const visionRobotMaterial = new THREE.MeshStandardMaterial({
+      color: '#f97316',
+      transparent: true,
+      opacity: 0.45,
+      metalness: 0.1,
+      roughness: 0.5,
+    });
+    const visionRobot = new THREE.Mesh(robotGeometry.clone(), visionRobotMaterial);
+    visionRobot.position.y = ROBOT_HEIGHT_M / 2 + 0.01;
+    visionRobot.visible = false;
+    scene.add(visionRobot);
+
     const headingArrow = new THREE.ArrowHelper(
       new THREE.Vector3(1, 0, 0),
       new THREE.Vector3(0, ROBOT_HEIGHT_M / 2 + 0.01, 0),
@@ -101,6 +122,14 @@ export default function FieldView({
       0xffd166
     );
     robot.add(headingArrow);
+
+    const visionHeadingArrow = new THREE.ArrowHelper(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, ROBOT_HEIGHT_M / 2 + 0.01, 0),
+      Math.max(robotLengthM, robotWidthM) * 0.6,
+      0xf97316
+    );
+    visionRobot.add(visionHeadingArrow);
 
     const loggedPointsGroup = new THREE.Group();
     scene.add(loggedPointsGroup);
@@ -125,6 +154,7 @@ export default function FieldView({
     sceneRef.current = scene;
     cameraRef.current = camera;
     robotRef.current = robot;
+    visionRobotRef.current = visionRobot;
     loggedPointsRef.current = loggedPointsGroup;
 
     return () => {
@@ -139,6 +169,8 @@ export default function FieldView({
       borderMaterial.dispose();
       robotGeometry.dispose();
       robotMaterial.dispose();
+      visionRobot.geometry.dispose();
+      visionRobotMaterial.dispose();
       scene.clear();
       if (renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
@@ -157,6 +189,29 @@ export default function FieldView({
     robot.position.z = clampedY - fieldWidthM / 2;
     robot.rotation.y = THREE.MathUtils.degToRad(headingDeg);
   }, [fieldLengthM, fieldWidthM, headingDeg, poseX, poseY]);
+
+  useEffect(() => {
+    const visionRobot = visionRobotRef.current;
+    if (!visionRobot) {
+      return;
+    }
+    visionRobot.visible = visionPoseVisible;
+    if (!visionPoseVisible) {
+      return;
+    }
+    const clampedX = THREE.MathUtils.clamp(visionPoseX ?? 0, 0, fieldLengthM);
+    const clampedY = THREE.MathUtils.clamp(visionPoseY ?? 0, 0, fieldWidthM);
+    visionRobot.position.x = clampedX - fieldLengthM / 2;
+    visionRobot.position.z = clampedY - fieldWidthM / 2;
+    visionRobot.rotation.y = THREE.MathUtils.degToRad(visionHeadingDeg ?? 0);
+  }, [
+    fieldLengthM,
+    fieldWidthM,
+    visionHeadingDeg,
+    visionPoseVisible,
+    visionPoseX,
+    visionPoseY,
+  ]);
 
   useEffect(() => {
     const group = loggedPointsRef.current;

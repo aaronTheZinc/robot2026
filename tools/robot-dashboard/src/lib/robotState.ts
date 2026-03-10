@@ -36,12 +36,21 @@ export type RobotState = {
     hoodSetpoint: number;
     hoodPitchDeg: number;
     velocityMps: number;
+    hoodCurrentAmps: number;
+    leftCurrentAmps: number;
+    rightCurrentAmps: number;
   };
   turret: {
     enabled: boolean;
     angleDeg: number;
     angleSetpoint: number;
     tracking: boolean;
+  };
+  visionPose: {
+    valid: boolean;
+    x: number;
+    y: number;
+    headingDeg: number;
   };
   targets: { x: number; y: number }[];
   /** Robot KNN selected point index from NT /KNN/selectedIndex, or -1 if not set */
@@ -58,6 +67,7 @@ export type RobotStateUpdate = {
   intake?: Partial<RobotState['intake']>;
   shooter?: Partial<RobotState['shooter']>;
   turret?: Partial<RobotState['turret']>;
+  visionPose?: Partial<RobotState['visionPose']>;
   targets?: RobotState['targets'];
   knnSelectedIndex?: number;
 };
@@ -105,12 +115,21 @@ export function createInitialRobotState(mode: RobotMode): RobotState {
       hoodSetpoint: 20,
       hoodPitchDeg: 0,
       velocityMps: 0,
+      hoodCurrentAmps: 0,
+      leftCurrentAmps: 0,
+      rightCurrentAmps: 0,
     },
     turret: {
       enabled: false,
       angleDeg: 0,
       angleSetpoint: 0,
       tracking: false,
+    },
+    visionPose: {
+      valid: false,
+      x: 0,
+      y: 0,
+      headingDeg: 0,
     },
     targets: [],
     knnSelectedIndex: -1,
@@ -131,6 +150,7 @@ export function applyRobotStateUpdate(
     intake: { ...prev.intake, ...update.intake },
     shooter: { ...prev.shooter, ...update.shooter },
     turret: { ...prev.turret, ...update.turret },
+    visionPose: { ...prev.visionPose, ...update.visionPose },
     targets: update.targets !== undefined ? update.targets : prev.targets,
     knnSelectedIndex:
       update.knnSelectedIndex !== undefined
@@ -239,6 +259,9 @@ export function nextMockState(prev: RobotState, nowMs = Date.now()): RobotState 
       hoodDeg,
       hoodPitchDeg,
       velocityMps,
+      hoodCurrentAmps: prev.shooter.enabled ? 6 + Math.sin(nowMs / 400) * 1.5 : 0.8,
+      leftCurrentAmps: prev.shooter.enabled ? 18 + Math.sin(nowMs / 350) * 3 : 0,
+      rightCurrentAmps: prev.shooter.enabled ? 17 + Math.cos(nowMs / 370) * 3 : 0,
     },
     turret: {
       ...prev.turret,

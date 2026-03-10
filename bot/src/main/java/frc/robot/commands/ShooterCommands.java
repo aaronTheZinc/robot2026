@@ -29,16 +29,17 @@ public class ShooterCommands {
     }
 
     public Command getRunShooterCommand() {
-        return getRunShooterCommand(this.shooter.shooterRpmSetpoint);
+        return Commands.run(
+                () -> shooter.setShooterRpm(shooter.getShooterRpmSetpoint()),
+                shooter)
+                .finallyDo(shooter::stopShooter);
     }
 
-        public Command getRunShooterCommandTest() {
-        return getRunShooterCommand(ShooterConstants.kTestSpeed);
+    public Command getRunShooterCommandTest() {
+        return getRunShooterVoltageCommand(ShooterConstants.kTestSpeed);
     }
 
-    
-
-    public Command getRunShooterCommand(double speed) {
+    private Command getRunShooterVoltageCommand(double speed) {
         double clampedSpeed = Math.max(-1.0, Math.min(1.0, speed));
         double shooterVolts = clampedSpeed * ShooterConstants.kMaxVoltageVolts;
 
@@ -47,7 +48,7 @@ public class ShooterCommands {
     }
 
     public Command getReverseShooterCommand() {
-        return getRunShooterCommand(-ShooterConstants.kTestSpeed);
+        return getRunShooterVoltageCommand(-ShooterConstants.kTestSpeed);
     }
 
     public Command getHoodHomingCommand() {

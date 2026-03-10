@@ -22,29 +22,35 @@ public final class ShooterConstants {
     public static final double kHoodDegreesPerMotorRev = 45.0;
 
     /** Optional soft limit: minimum hood angle in degrees (e.g. 0). */
-    public static final double kHoodMinAngleDeg = 0.0;
+    public static final double kHoodMinAngleDeg = 0;
     /** Optional soft limit: maximum hood angle in degrees (e.g. 90). */
-    public static final double kHoodMaxAngleDeg = 90.0;
+    public static final double kHoodMaxAngleDeg = 90;
 
     /** Hood position PID gains (slot 0). Tune for your mechanism. */
     public static final double kHoodKp = 2.0;
     public static final double kHoodKi = 0.0;
     public static final double kHoodKd = 0.1;
+    /** Open-loop hood hold/move gain in volts per degree of angle error. */
+    public static final double kHoodAngleErrorVoltsPerDeg = 0.2;
+    /** Maximum voltage magnitude when driving hood from angle error. */
+    public static final double kHoodAngleControlMaxVoltageVolts = 6.0;
+    /** Angle error deadband where hood voltage control stops driving. */
+    public static final double kHoodAngleToleranceDeg = 0.5;
 
     /**
-     * Homing (real robot only): run hood backward until stall.
-     * Voltage (V) applied during homing; negative = toward mechanical stop.
+     * Homing (real robot only): run hood toward the zero/mechanical-stop position until stall.
+     * Voltage (V) applied during homing; negative = toward mechanical stop / hood down.
      */
     public static final double kHoodHomingVoltageVolts = -2.0;
     /**
      * Stator current (A) above which we consider the hood at the mechanical stop.
      * Increase if homing triggers too early; decrease if it never triggers.
      */
-    public static final double kHoodStallCurrentAmps = 15.0;
+    public static final double kHoodStallCurrentAmps = 30.0;
     /** Number of consecutive cycles current must be above threshold to confirm stall. */
-    public static final int kHoodStallConfirmCycles = 5;
+    public static final int kHoodStallConfirmCycles = 10;
     /** Hood stator current limit (A) during normal operation and homing. */
-    public static final double kHoodStatorCurrentLimitAmps = 25.0;
+    public static final double kHoodStatorCurrentLimitAmps = 35.0;
 
     /** Max voltage (volts) for converting normalized speed [-1, 1] to voltage. */
     public static final double kMaxVoltageVolts = 12.0;
