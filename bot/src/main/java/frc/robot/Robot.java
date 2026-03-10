@@ -7,6 +7,8 @@ package frc.robot;
 import com.ctre.phoenix6.HootAutoReplay;
 import com.ctre.phoenix6.Utils;
 
+import edu.wpi.first.cameraserver.CameraServer;
+import edu.wpi.first.cscore.UsbCamera;
 import edu.wpi.first.net.PortForwarder;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -24,6 +26,7 @@ public class Robot extends TimedRobot {
     private static final String LIMELIGHT_HOST = "limelight.local";
     private static final int LIMELIGHT_PORT_START = 5800;
     private static final int LIMELIGHT_PORT_END = 5809;
+    private UsbCamera m_driverCamera;
 
     private Command m_autonomousCommand;
 
@@ -40,6 +43,12 @@ public class Robot extends TimedRobot {
 
     @Override
     public void robotInit() {
+        if (!Utils.isSimulation()) {
+            m_driverCamera = CameraServer.startAutomaticCapture();
+            m_driverCamera.setResolution(320, 240);
+            m_driverCamera.setFPS(20);
+        }
+
         if (Utils.isSimulation()) {
             for (int port = LIMELIGHT_PORT_START; port <= LIMELIGHT_PORT_END; port++) {
                 PortForwarder.add(port, LIMELIGHT_HOST, port);

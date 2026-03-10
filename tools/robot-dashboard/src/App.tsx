@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import './App.css';
+import CameraView from './components/CameraView';
 import ChassisView from './components/ChassisView';
-import FieldView from './components/FieldView';
 import KnnGridView from './components/KnnGridView';
 import MotorTestPanel from './components/MotorTestPanel';
 import MotorTestView from './components/MotorTestView';
@@ -167,7 +167,7 @@ function App() {
   const [port, setPort] = useState(DEFAULT_PORT);
   const [viewTab, setViewTab] = useState<ViewTab>('dashboard');
   const [state, setState] = useState(() => createInitialRobotState('mock'));
-  const [robotDims, setRobotDims] = useState({ lengthM: 0.9, widthM: 0.8 });
+  const robotDims = { lengthM: 0.9, widthM: 0.8 };
   const [loggedPoints, setLoggedPoints] = useState<{ x: number; y: number }[]>([]);
   const [shooterCurrentHistory, setShooterCurrentHistory] = useState<CurrentHistory>({
     hood: [0],
@@ -506,17 +506,50 @@ function App() {
       )}
 
       {viewTab === 'knngrid' && (
-        <KnnGridView
-          fieldLengthM={FIELD_LENGTH_M}
-          fieldWidthM={FIELD_WIDTH_M}
-          loggedPoints={loggedPoints}
-          poseX={state.swerve.x}
-          poseY={state.swerve.y}
-          headingDeg={state.swerve.headingDeg}
-          robotSelectedIndex={
-            state.knnSelectedIndex >= 0 ? state.knnSelectedIndex : null
-          }
-        />
+        <>
+          {isDebug && (
+            <section className="subsystem-view">
+              <div className="panel">
+                <div className="panel-header">
+                  <h2>KNN Log</h2>
+                  {loggedPoints.length > 0 && (
+                    <span className="status-pill neutral">{loggedPoints.length} points</span>
+                  )}
+                </div>
+                <div className="control-row">
+                  <label>Log file</label>
+                  <input
+                    ref={knnLogInputRef}
+                    type="file"
+                    accept=".json,application/json"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      loadKnnLog(e.target.files?.[0] ?? null);
+                      e.target.value = '';
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => knnLogInputRef.current?.click()}
+                  >
+                    Load KNN log
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+          <KnnGridView
+            fieldLengthM={FIELD_LENGTH_M}
+            fieldWidthM={FIELD_WIDTH_M}
+            loggedPoints={loggedPoints}
+            poseX={state.swerve.x}
+            poseY={state.swerve.y}
+            headingDeg={state.swerve.headingDeg}
+            robotSelectedIndex={
+              state.knnSelectedIndex >= 0 ? state.knnSelectedIndex : null
+            }
+          />
+        </>
       )}
 
       {viewTab === 'chassis' && (
@@ -557,8 +590,8 @@ function App() {
       )}
 
       {viewTab === 'dashboard' && (
+      isDebug ? (
       <section className="dashboard-grid">
-        {isDebug && (
         <div className="panel connection-panel">
           <div className="panel-header">
             <h2>Connection</h2>
@@ -615,87 +648,18 @@ function App() {
             still allowing manual overrides.
           </div>
         </div>
-        )}
 
         <div className="panel field-panel">
           <div className="panel-header">
-            <h2>Field View</h2>
+            <h2>Camera</h2>
             <span className="status-pill neutral">
-              {FIELD_LENGTH_M}m x {FIELD_WIDTH_M}m
+              USB Camera
             </span>
           </div>
-          <FieldView
-            fieldLengthM={FIELD_LENGTH_M}
-            fieldWidthM={FIELD_WIDTH_M}
-            robotLengthM={robotDims.lengthM}
-            robotWidthM={robotDims.widthM}
-            poseX={state.swerve.x}
-            poseY={state.swerve.y}
-            headingDeg={state.swerve.headingDeg}
-            visionPoseX={state.visionPose.x}
-            visionPoseY={state.visionPose.y}
-            visionHeadingDeg={state.visionPose.headingDeg}
-            visionPoseVisible={state.visionPose.valid}
-            loggedPoints={loggedPoints}
-          />
-          {isDebug && (
-            <>
-              <div className="control-row">
-                <label>KNN log</label>
-                <input
-                  ref={knnLogInputRef}
-                  type="file"
-                  accept=".json,application/json"
-                  style={{ display: 'none' }}
-                  onChange={(e) => {
-                    loadKnnLog(e.target.files?.[0] ?? null);
-                    e.target.value = '';
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => knnLogInputRef.current?.click()}
-                >
-                  Load KNN log
-                </button>
-                {loggedPoints.length > 0 && (
-                  <span className="status-pill neutral">{loggedPoints.length} points</span>
-                )}
-              </div>
-              <div className="control-row">
-                <label>Robot L</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={robotDims.lengthM}
-                  onChange={(event) =>
-                    setRobotDims((prev) => ({
-                      ...prev,
-                      lengthM: Number(event.target.value) || 0,
-                    }))
-                  }
-                />
-              </div>
-              <div className="control-row">
-                <label>Robot W</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={robotDims.widthM}
-                  onChange={(event) =>
-                    setRobotDims((prev) => ({
-                      ...prev,
-                      widthM: Number(event.target.value) || 0,
-                    }))
-                  }
-                />
-              </div>
-              <div className="hint">
-                Pose is mapped to field coordinates (meters) with the origin at the lower-left
-                corner of the field.
-              </div>
-            </>
-          )}
+          <CameraView uri={uri} enabled={mode === 'nt4' && nt4Enabled} />
+          <div className="hint">
+            Live MJPEG stream from the roboRIO camera server on port 1181.
+          </div>
         </div>
 
         <div className="panel">
@@ -971,6 +935,13 @@ function App() {
           compact
         />
       </section>
+      ) : (
+      <section className="competition-dashboard">
+        <div className="panel competition-camera-panel">
+          <CameraView uri={uri} enabled={mode === 'nt4' && nt4Enabled} />
+        </div>
+      </section>
+      )
       )}
     </div>
   );

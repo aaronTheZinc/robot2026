@@ -269,6 +269,10 @@ public class ShooterSubsystem extends SubsystemBase {
         }
 
         double volts = errorDeg * ShooterConstants.kHoodAngleErrorVoltsPerDeg;
+        double minMoveVolts = ShooterConstants.kHoodAngleControlMinVoltageVolts;
+        if (Math.abs(volts) < minMoveVolts) {
+            volts = Math.copySign(minMoveVolts, errorDeg);
+        }
         double clampedVolts = Math.max(
                 -ShooterConstants.kHoodAngleControlMaxVoltageVolts,
                 Math.min(ShooterConstants.kHoodAngleControlMaxVoltageVolts, volts));

@@ -32,6 +32,8 @@ public final class ShooterConstants {
     public static final double kHoodKd = 0.1;
     /** Open-loop hood hold/move gain in volts per degree of angle error. */
     public static final double kHoodAngleErrorVoltsPerDeg = 0.2;
+    /** Minimum voltage magnitude to overcome hood stiction when moving toward a setpoint. */
+    public static final double kHoodAngleControlMinVoltageVolts = 0.4;
     /** Maximum voltage magnitude when driving hood from angle error. */
     public static final double kHoodAngleControlMaxVoltageVolts = 6.0;
     /** Angle error deadband where hood voltage control stops driving. */
@@ -46,9 +48,9 @@ public final class ShooterConstants {
      * Stator current (A) above which we consider the hood at the mechanical stop.
      * Increase if homing triggers too early; decrease if it never triggers.
      */
-    public static final double kHoodStallCurrentAmps = 30.0;
+    public static final double kHoodStallCurrentAmps = 25.0;
     /** Number of consecutive cycles current must be above threshold to confirm stall. */
-    public static final int kHoodStallConfirmCycles = 10;
+    public static final int kHoodStallConfirmCycles = 5;
     /** Hood stator current limit (A) during normal operation and homing. */
     public static final double kHoodStatorCurrentLimitAmps = 35.0;
 

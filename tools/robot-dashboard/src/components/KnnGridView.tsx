@@ -101,8 +101,8 @@ export default function KnnGridView({
             <h2>KNN Grid</h2>
           </div>
           <p className="nt-hint">
-            Load a KNN log from the Dashboard tab to see the grid and inferred
-            point for the current chassis pose.
+            Load a KNN log to see the grid and inferred point for the current
+            chassis pose.
           </p>
         </div>
       </section>
