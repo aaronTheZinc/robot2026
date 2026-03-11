@@ -3,6 +3,7 @@ package frc.robot.subsystems;
 import static edu.wpi.first.units.Units.*;
 
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import com.ctre.phoenix6.SignalLogger;
@@ -15,6 +16,7 @@ import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.config.RobotConfig;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
+import com.pathplanner.lib.path.PathConstraints;
 
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -27,6 +29,7 @@ import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.Notifier;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 
@@ -53,6 +56,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     /** Swerve request to apply during robot-centric path following */
     private final SwerveRequest.ApplyRobotSpeeds m_pathApplyRobotSpeeds = new SwerveRequest.ApplyRobotSpeeds();
+    private static final PathConstraints kDriverAssistPathConstraints = new PathConstraints(
+        2.0,
+        2.0,
+        Math.toRadians(360.0),
+        Math.toRadians(540.0)
+    );
 
     /* Swerve requests to apply during SysId characterization */
     private final SwerveRequest.SysIdSwerveTranslation m_translationCharacterization = new SwerveRequest.SysIdSwerveTranslation();
@@ -237,6 +246,26 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
      */
     public Command applyRequest(Supplier<SwerveRequest> request) {
         return run(() -> this.setControl(request.get()));
+    }
+
+    /**
+     * Pathfinds the drivetrain to a field pose using the configured holonomic AutoBuilder.
+     *
+     * @param targetPose target pose in field coordinates
+     * @return Command to pathfind to the target pose
+     */
+    public Command pathfindToPose(Pose2d targetPose) {
+        return AutoBuilder.pathfindToPose(targetPose, kDriverAssistPathConstraints, 0.0);
+    }
+
+    /**
+     * Pathfinds the drivetrain to a field pose supplied at command start.
+     *
+     * @param targetPoseSupplier supplier for the desired target pose
+     * @return Command to pathfind to the supplied target pose
+     */
+    public Command pathfindToPose(Supplier<Pose2d> targetPoseSupplier) {
+        return Commands.defer(() -> pathfindToPose(targetPoseSupplier.get()), Set.of(this));
     }
 
     /**

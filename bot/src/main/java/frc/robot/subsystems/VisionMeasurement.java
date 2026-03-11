@@ -61,6 +61,7 @@ public class VisionMeasurement extends SubsystemBase {
         .publish();
     private final double[] m_dashboardPose = new double[3];
     private final double[] m_limelightEstimatedPose = new double[3];
+    private boolean m_teleopVisionFusionEnabled = true;
 
     /**
      * Creates a vision measurement subsystem that fuses the given Limelight with the drivetrain.
@@ -84,6 +85,16 @@ public class VisionMeasurement extends SubsystemBase {
      */
     public VisionMeasurement(CommandSwerveDrivetrain drivetrain) {
         this(drivetrain, DEFAULT_LIMELIGHT_NAME, true);
+    }
+
+    /**
+     * Enables or disables applying Limelight vision measurements during teleop.
+     * Normal driver control keeps this off; assist commands can enable it while active.
+     *
+     * @param enabled true to fuse vision during teleop, false to use odometry only
+     */
+    public void setTeleopVisionFusionEnabled(boolean enabled) {
+        m_teleopVisionFusionEnabled = enabled;
     }
 
     /**
@@ -127,8 +138,10 @@ public class VisionMeasurement extends SubsystemBase {
             publishLimelightEstimatedPoseInvalid();
         }
 
-        // No vision pose fusion in teleop; chassis runs on encoder odometry only and is uninterrupted.
-        if (DriverStation.isTeleop()) {
+        SmartDashboard.putBoolean("Limelight/teleopVisionFusionEnabled", m_teleopVisionFusionEnabled);
+
+        // Keep normal teleop on encoder odometry only unless a driver assist explicitly enables fusion.
+        if (DriverStation.isTeleop() && !m_teleopVisionFusionEnabled) {
             return;
         }
 

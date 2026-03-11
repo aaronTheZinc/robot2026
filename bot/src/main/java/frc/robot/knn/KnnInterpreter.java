@@ -5,15 +5,14 @@
 package frc.robot.knn;
 
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.networktables.IntegerPublisher;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.wpilibj.Filesystem;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -27,8 +26,9 @@ import java.util.List;
  */
 public class KnnInterpreter {
     private static final String KNN_MAP_FILENAME = "knn_map.json";
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    private final List<double[]> points = new ArrayList<>();
+    private final List<Pose2d> points = new ArrayList<>();
     private final NetworkTable table;
     private final IntegerPublisher selectedIndexPub;
     private int lastSelectedIndex = -1;
@@ -41,8 +41,9 @@ public class KnnInterpreter {
 
     /**
      * Loads the KNN map from deploy/knn_map.json. Expects a JSON array of
-     * objects with "x" and "y" (meters). If the file is missing or invalid,
-     * the map remains empty and selectedIndex will stay -1.
+     * objects with "x", "y", and optional "headingDeg" / "rotation" fields.
+     * If the file is missing or invalid, the map remains empty and
+     * selectedIndex will stay -1.
      */
     private void loadMap() {
         points.clear();
@@ -53,25 +54,52 @@ public class KnnInterpreter {
         }
         try {
             String json = Files.readString(mapPath);
-            Gson gson = new Gson();
-            JsonArray arr = gson.fromJson(json, JsonArray.class);
-            if (arr == null) {
+            JsonNode root = OBJECT_MAPPER.readTree(json);
+            if (root == null || !root.isArray()) {
                 return;
             }
-            for (JsonElement el : arr) {
-                if (!el.isJsonObject()) {
+            for (JsonNode node : root) {
+                if (!node.isObject()) {
                     continue;
                 }
-                JsonObject obj = el.getAsJsonObject();
-                if (obj.has("x") && obj.has("y")) {
-                    double x = obj.get("x").getAsDouble();
-                    double y = obj.get("y").getAsDouble();
-                    points.add(new double[] { x, y });
+                if (node.has("x") && node.has("y")) {
+                    double x = node.get("x").asDouble();
+                    double y = node.get("y").asDouble();
+                    double headingDeg = 0.0;
+                    if (node.has("headingDeg")) {
+                        headingDeg = node.get("headingDeg").asDouble();
+                    } else if (node.has("rotation")) {
+                        headingDeg = node.get("rotation").asDouble();
+                    }
+                    points.add(new Pose2d(x, y, Rotation2d.fromDegrees(headingDeg)));
                 }
             }
         } catch (Exception e) {
             // Map remains empty; robot can still run without KNN
         }
+    }
+
+    private int findNearestIndex(Pose2d pose) {
+        double x = pose.getX();
+        double y = pose.getY();
+        int best = -1;
+        double bestDistSq = Double.POSITIVE_INFINITY;
+        for (int i = 0; i < points.size(); i++) {
+            Pose2d p = points.get(i);
+            double dx = x - p.getX();
+            double dy = y - p.getY();
+            double distSq = dx * dx + dy * dy;
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    private void publishSelection(int index) {
+        lastSelectedIndex = index;
+        selectedIndexPub.set(index);
     }
 
     /**
@@ -82,22 +110,20 @@ public class KnnInterpreter {
      * @param pose current robot pose in field coordinates (meters)
      */
     public void update(Pose2d pose) {
-        double x = pose.getX();
-        double y = pose.getY();
-        int best = -1;
-        double bestDistSq = Double.POSITIVE_INFINITY;
-        for (int i = 0; i < points.size(); i++) {
-            double[] p = points.get(i);
-            double dx = x - p[0];
-            double dy = y - p[1];
-            double distSq = dx * dx + dy * dy;
-            if (distSq < bestDistSq) {
-                bestDistSq = distSq;
-                best = i;
-            }
-        }
-        lastSelectedIndex = best;
-        selectedIndexPub.set(best);
+        publishSelection(findNearestIndex(pose));
+    }
+
+    /**
+     * Returns the nearest recorded pose to the supplied robot pose and
+     * publishes the selected index for dashboard alignment.
+     *
+     * @param pose current robot pose in field coordinates (meters)
+     * @return nearest recorded target pose, if one exists
+     */
+    public java.util.Optional<Pose2d> getNearestPose(Pose2d pose) {
+        int best = findNearestIndex(pose);
+        publishSelection(best);
+        return best >= 0 ? java.util.Optional.of(points.get(best)) : java.util.Optional.empty();
     }
 
     /** Returns the number of loaded map points. */

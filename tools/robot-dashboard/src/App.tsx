@@ -23,10 +23,12 @@ import {
   nextMockState,
 } from './lib/robotState';
 import type { RobotMode, RobotStateUpdate } from './lib/robotState';
+import type { KnnPoint } from './lib/knnInference';
 
 const STORAGE_KEY_URI = 'robot-dashboard-uri';
 const STORAGE_KEY_PORT = 'robot-dashboard-port';
 const STORAGE_KEY_DASHBOARD_MODE = 'robot-dashboard-mode';
+const STORAGE_KEY_KNN_MAP = 'robot-dashboard-knn-map-v1';
 
 export type ViewTab =
   | 'dashboard'
@@ -86,6 +88,69 @@ function formatNumber(value: number, digits = 1): string {
 
 function formatSeconds(value: number): string {
   return `${Math.max(0, Math.round(value))}s`;
+}
+
+function normalizeKnnPoints(value: unknown): KnnPoint[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter(
+      (item: unknown): item is { x: number; y: number } =>
+        item != null &&
+        typeof item === 'object' &&
+        typeof (item as { x?: unknown }).x === 'number' &&
+        typeof (item as { y?: unknown }).y === 'number'
+    )
+    .map((item) => {
+      const record = item as Record<string, unknown>;
+      return {
+        x: item.x,
+        y: item.y,
+        headingDeg:
+          typeof record.headingDeg === 'number'
+            ? record.headingDeg
+            : typeof record.rotation === 'number'
+              ? record.rotation
+              : 0,
+        shooterRpm:
+          typeof record.shooterRpm === 'number'
+            ? record.shooterRpm
+            : typeof record.shooter === 'number'
+              ? record.shooter
+              : 0,
+        hoodDeg:
+          typeof record.hoodDeg === 'number'
+            ? record.hoodDeg
+            : typeof record.hood === 'number'
+              ? record.hood
+              : 0,
+      };
+    });
+}
+
+function loadStoredKnnMap(): KnnPoint[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_KNN_MAP);
+    if (!raw) {
+      return [];
+    }
+    return normalizeKnnPoints(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+}
+
+function downloadJson(filename: string, data: unknown) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: 'application/json',
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function CurrentTrace({
@@ -168,7 +233,14 @@ function App() {
   const [viewTab, setViewTab] = useState<ViewTab>('dashboard');
   const [state, setState] = useState(() => createInitialRobotState('mock'));
   const robotDims = { lengthM: 0.9, widthM: 0.8 };
-  const [loggedPoints, setLoggedPoints] = useState<{ x: number; y: number }[]>([]);
+  const [loggedPoints, setLoggedPoints] = useState<KnnPoint[]>(() => loadStoredKnnMap());
+  const [knnDraftPoint, setKnnDraftPoint] = useState<KnnPoint>({
+    x: 0,
+    y: 0,
+    headingDeg: 0,
+    shooterRpm: 0,
+    hoodDeg: 0,
+  });
   const [shooterCurrentHistory, setShooterCurrentHistory] = useState<CurrentHistory>({
     hood: [0],
     left: [0],
@@ -230,28 +302,80 @@ function App() {
     setState((prev) => applyRobotStateUpdate(prev, update, Date.now()));
   };
 
+  const persistKnnMap = (points: KnnPoint[]) => {
+    setLoggedPoints(points);
+    try {
+      localStorage.setItem(STORAGE_KEY_KNN_MAP, JSON.stringify(points));
+    } catch {
+      /* ignore */
+    }
+  };
+
   const loadKnnLog = (file: File | null) => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const parsed = JSON.parse(String(reader.result));
-        if (!Array.isArray(parsed)) return;
-        const points = parsed
-          .filter(
-            (item: unknown): item is { x: number; y: number } =>
-              item != null &&
-              typeof item === 'object' &&
-              typeof (item as { x?: unknown }).x === 'number' &&
-              typeof (item as { y?: unknown }).y === 'number'
-          )
-          .map((item) => ({ x: item.x, y: item.y }));
-        setLoggedPoints(points);
+        const points = normalizeKnnPoints(JSON.parse(String(reader.result)));
+        persistKnnMap(points);
       } catch {
-        setLoggedPoints([]);
+        persistKnnMap([]);
       }
     };
     reader.readAsText(file);
+  };
+
+  const addKnnPoint = (point: KnnPoint) => {
+    persistKnnMap([
+      ...loggedPoints,
+      {
+        x: Number.isFinite(point.x) ? point.x : 0,
+        y: Number.isFinite(point.y) ? point.y : 0,
+        headingDeg: Number.isFinite(point.headingDeg) ? point.headingDeg : 0,
+        shooterRpm: Number.isFinite(point.shooterRpm) ? point.shooterRpm : 0,
+        hoodDeg: Number.isFinite(point.hoodDeg) ? point.hoodDeg : 0,
+      },
+    ]);
+  };
+
+  const updateKnnPoint = (index: number, field: keyof KnnPoint, value: number) => {
+    persistKnnMap(
+      loggedPoints.map((point, pointIndex) =>
+        pointIndex === index ? { ...point, [field]: Number.isFinite(value) ? value : 0 } : point
+      )
+    );
+  };
+
+  const removeKnnPoint = (index: number) => {
+    persistKnnMap(loggedPoints.filter((_, pointIndex) => pointIndex !== index));
+  };
+
+  const clearKnnPoints = () => {
+    persistKnnMap([]);
+  };
+
+  const addCurrentPoseToKnnMap = () => {
+    addKnnPoint({
+      x: state.swerve.x,
+      y: state.swerve.y,
+      headingDeg: state.swerve.headingDeg,
+      shooterRpm: state.shooter.rpmSetpoint,
+      hoodDeg: state.shooter.hoodSetpoint,
+    });
+  };
+
+  const copyCurrentStateToDraft = () => {
+    setKnnDraftPoint({
+      x: state.swerve.x,
+      y: state.swerve.y,
+      headingDeg: state.swerve.headingDeg,
+      shooterRpm: state.shooter.rpmSetpoint,
+      hoodDeg: state.shooter.hoodSetpoint,
+    });
+  };
+
+  const exportKnnMap = () => {
+    downloadJson('knn_map.json', loggedPoints);
   };
 
   useEffect(() => {
@@ -511,13 +635,13 @@ function App() {
             <section className="subsystem-view">
               <div className="panel">
                 <div className="panel-header">
-                  <h2>KNN Log</h2>
+                  <h2>KNN Map Builder</h2>
                   {loggedPoints.length > 0 && (
                     <span className="status-pill neutral">{loggedPoints.length} points</span>
                   )}
                 </div>
                 <div className="control-row">
-                  <label>Log file</label>
+                  <label>Map file</label>
                   <input
                     ref={knnLogInputRef}
                     type="file"
@@ -532,8 +656,81 @@ function App() {
                     type="button"
                     onClick={() => knnLogInputRef.current?.click()}
                   >
-                    Load KNN log
+                    Load JSON
                   </button>
+                  <button type="button" onClick={exportKnnMap} disabled={loggedPoints.length === 0}>
+                    Export JSON
+                  </button>
+                  <button type="button" onClick={addCurrentPoseToKnnMap}>
+                    Add current pose
+                  </button>
+                  <button type="button" onClick={clearKnnPoints} disabled={loggedPoints.length === 0}>
+                    Clear map
+                  </button>
+                </div>
+                <div className="control-row">
+                  <label>Manual point</label>
+                  <input
+                    type="number"
+                    value={knnDraftPoint.x}
+                    onChange={(event) =>
+                      setKnnDraftPoint((prev) => ({
+                        ...prev,
+                        x: Number(event.target.value) || 0,
+                      }))
+                    }
+                  />
+                  <input
+                    type="number"
+                    value={knnDraftPoint.y}
+                    onChange={(event) =>
+                      setKnnDraftPoint((prev) => ({
+                        ...prev,
+                        y: Number(event.target.value) || 0,
+                      }))
+                    }
+                  />
+                  <input
+                    type="number"
+                    value={knnDraftPoint.headingDeg ?? 0}
+                    onChange={(event) =>
+                      setKnnDraftPoint((prev) => ({
+                        ...prev,
+                        headingDeg: Number(event.target.value) || 0,
+                      }))
+                    }
+                  />
+                  <input
+                    type="number"
+                    value={knnDraftPoint.shooterRpm ?? 0}
+                    onChange={(event) =>
+                      setKnnDraftPoint((prev) => ({
+                        ...prev,
+                        shooterRpm: Number(event.target.value) || 0,
+                      }))
+                    }
+                  />
+                  <input
+                    type="number"
+                    value={knnDraftPoint.hoodDeg ?? 0}
+                    onChange={(event) =>
+                      setKnnDraftPoint((prev) => ({
+                        ...prev,
+                        hoodDeg: Number(event.target.value) || 0,
+                      }))
+                    }
+                  />
+                  <button type="button" onClick={copyCurrentStateToDraft}>
+                    Use current state
+                  </button>
+                  <button type="button" onClick={() => addKnnPoint(knnDraftPoint)}>
+                    Add point
+                  </button>
+                </div>
+                <div className="hint">
+                  Build the same `knn_map.json` format the robot reads from deploy, and keep it visible
+                  here as a field reference while you set up positions. Each point can also store shooter
+                  RPM and hood angle for later interpretation.
                 </div>
               </div>
             </section>
@@ -545,6 +742,8 @@ function App() {
             poseX={state.swerve.x}
             poseY={state.swerve.y}
             headingDeg={state.swerve.headingDeg}
+            onPointChange={updateKnnPoint}
+            onPointRemove={removeKnnPoint}
             robotSelectedIndex={
               state.knnSelectedIndex >= 0 ? state.knnSelectedIndex : null
             }

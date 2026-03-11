@@ -4,7 +4,13 @@
  * robot interpreter can align on the same selection.
  */
 
-export type KnnPoint = { x: number; y: number };
+export type KnnPoint = {
+  x: number;
+  y: number;
+  headingDeg?: number;
+  shooterRpm?: number;
+  hoodDeg?: number;
+};
 
 export type KnnInferenceConfig = {
   /** Weight for x distance (default 1) */

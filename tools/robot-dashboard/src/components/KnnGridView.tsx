@@ -1,17 +1,20 @@
 import { useMemo } from 'react';
 import { inferKnn } from '../lib/knnInference';
+import type { KnnPoint } from '../lib/knnInference';
 
 const CELL_SIZE_M = 1.0;
 
 type Props = {
   fieldLengthM: number;
   fieldWidthM: number;
-  loggedPoints: { x: number; y: number }[];
+  loggedPoints: KnnPoint[];
   poseX: number;
   poseY: number;
   headingDeg?: number;
   /** If set, highlight this index as "robot-selected" (from NT) in addition to local inference */
   robotSelectedIndex?: number | null;
+  onPointChange?: (index: number, field: keyof KnnPoint, value: number) => void;
+  onPointRemove?: (index: number) => void;
 };
 
 export default function KnnGridView({
@@ -22,6 +25,8 @@ export default function KnnGridView({
   poseY,
   headingDeg,
   robotSelectedIndex = null,
+  onPointChange,
+  onPointRemove,
 }: Props) {
   const inference = useMemo(
     () =>
@@ -168,7 +173,11 @@ export default function KnnGridView({
                   <th>Index</th>
                   <th>X (m)</th>
                   <th>Y (m)</th>
+                  <th>Heading (deg)</th>
+                  <th>Shooter RPM</th>
+                  <th>Hood (deg)</th>
                   <th>Inferred</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -180,9 +189,90 @@ export default function KnnGridView({
                     }
                   >
                     <td>{idx}</td>
-                    <td>{pt.x.toFixed(2)}</td>
-                    <td>{pt.y.toFixed(2)}</td>
+                    <td>
+                      {onPointChange ? (
+                        <input
+                          className="knn-point-input"
+                          type="number"
+                          value={pt.x}
+                          onChange={(event) =>
+                            onPointChange(idx, 'x', Number(event.target.value) || 0)
+                          }
+                        />
+                      ) : (
+                        pt.x.toFixed(2)
+                      )}
+                    </td>
+                    <td>
+                      {onPointChange ? (
+                        <input
+                          className="knn-point-input"
+                          type="number"
+                          value={pt.y}
+                          onChange={(event) =>
+                            onPointChange(idx, 'y', Number(event.target.value) || 0)
+                          }
+                        />
+                      ) : (
+                        pt.y.toFixed(2)
+                      )}
+                    </td>
+                    <td>
+                      {onPointChange ? (
+                        <input
+                          className="knn-point-input"
+                          type="number"
+                          value={pt.headingDeg ?? 0}
+                          onChange={(event) =>
+                            onPointChange(idx, 'headingDeg', Number(event.target.value) || 0)
+                          }
+                        />
+                      ) : (
+                        (pt.headingDeg ?? 0).toFixed(1)
+                      )}
+                    </td>
+                    <td>
+                      {onPointChange ? (
+                        <input
+                          className="knn-point-input"
+                          type="number"
+                          value={pt.shooterRpm ?? 0}
+                          onChange={(event) =>
+                            onPointChange(idx, 'shooterRpm', Number(event.target.value) || 0)
+                          }
+                        />
+                      ) : (
+                        (pt.shooterRpm ?? 0).toFixed(0)
+                      )}
+                    </td>
+                    <td>
+                      {onPointChange ? (
+                        <input
+                          className="knn-point-input"
+                          type="number"
+                          value={pt.hoodDeg ?? 0}
+                          onChange={(event) =>
+                            onPointChange(idx, 'hoodDeg', Number(event.target.value) || 0)
+                          }
+                        />
+                      ) : (
+                        (pt.hoodDeg ?? 0).toFixed(1)
+                      )}
+                    </td>
                     <td>{idx === inferredIndex ? 'Yes' : '—'}</td>
+                    <td>
+                      {onPointRemove ? (
+                        <button
+                          type="button"
+                          className="knn-row-delete"
+                          onClick={() => onPointRemove(idx)}
+                        >
+                          Delete
+                        </button>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

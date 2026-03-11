@@ -11,6 +11,7 @@ import com.ctre.phoenix6.swerve.SwerveRequest;
 
 import com.pathplanner.lib.auto.AutoBuilder;
 
+import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -30,6 +31,9 @@ import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.VisionMeasurement;
 
 public class RobotContainer {
+    private static final String kDriveAssistTargetXKey = "Drive Assist/Target X (m)";
+    private static final String kDriveAssistTargetYKey = "Drive Assist/Target Y (m)";
+    private static final String kDriveAssistTargetHeadingKey = "Drive Assist/Target Heading (deg)";
     private double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
     private double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond); // 3/4 of a rotation per second max angular velocity
 
@@ -39,8 +43,6 @@ public class RobotContainer {
             .withDriveRequestType(DriveRequestType.OpenLoopVoltage); // Use open-loop control for drive motors
     private final SwerveRequest.SwerveDriveBrake brake = new SwerveRequest.SwerveDriveBrake();
     private final SwerveRequest.PointWheelsAt point = new SwerveRequest.PointWheelsAt();
-    private final SwerveRequest.RobotCentric forwardStraight = new SwerveRequest.RobotCentric()
-            .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
     private final Telemetry logger = new Telemetry(MaxSpeed);
     private final KnnInterpreter knnInterpreter = new KnnInterpreter();
@@ -68,8 +70,38 @@ public class RobotContainer {
         SmartDashboard.putData("Debug/Decrement Hood (deg)", shooterCommands.getDecrementHoodDegreesCommand());
         SmartDashboard.putData("Debug/Increment Shooter RPM", shooterCommands.getIncrementShooterRpmCommand());
         SmartDashboard.putData("Debug/Decrement Shooter RPM", shooterCommands.getDecrementShooterRpmCommand());
+        SmartDashboard.putString("Drive Assist/Source", "Nearest KNN map pose");
+        SmartDashboard.putNumber(kDriveAssistTargetXKey, 0.0);
+        SmartDashboard.putNumber(kDriveAssistTargetYKey, 0.0);
+        SmartDashboard.putNumber(kDriveAssistTargetHeadingKey, 0.0);
 
         configureBindings();
+    }
+
+    private Pose2d getDriveAssistTargetPose() {
+        Pose2d currentPose = drivetrain.getState().Pose;
+        Pose2d targetPose = knnInterpreter.getNearestPose(currentPose).orElse(currentPose);
+        SmartDashboard.putNumber(kDriveAssistTargetXKey, targetPose.getX());
+        SmartDashboard.putNumber(kDriveAssistTargetYKey, targetPose.getY());
+        SmartDashboard.putNumber(kDriveAssistTargetHeadingKey, targetPose.getRotation().getDegrees());
+        return targetPose;
+    }
+
+    private Command getDriveAssistCommand() {
+        return Commands.parallel(
+            Commands.startEnd(
+                () -> visionMeasurement.setTeleopVisionFusionEnabled(true),
+                () -> visionMeasurement.setTeleopVisionFusionEnabled(false),
+                visionMeasurement
+            ),
+            drivetrain.pathfindToPose(this::getDriveAssistTargetPose)
+                .andThen(drivetrain.applyRequest(() -> brake))
+        );
+    }
+
+    private Command getPointWheelsAtAngleCommand(double angleDegrees) {
+        Rotation2d direction = Rotation2d.fromDegrees(angleDegrees);
+        return drivetrain.applyRequest(() -> point.withModuleDirection(direction));
     }
 
     private void configureBindings() {
@@ -96,12 +128,15 @@ public class RobotContainer {
             point.withModuleDirection(new Rotation2d(-joystick.getLeftY(), joystick.getLeftX()))
         ));
 
-        joystick.povUp().whileTrue(drivetrain.applyRequest(() ->
-            forwardStraight.withVelocityX(0.5).withVelocityY(0))
-        );
-        joystick.povDown().whileTrue(drivetrain.applyRequest(() ->
-            forwardStraight.withVelocityX(-0.5).withVelocityY(0))
-        );
+        // Driver D-pad wheel-angle test: each direction points all modules at that heading.
+        joystick.povUp().whileTrue(getPointWheelsAtAngleCommand(0.0));
+        joystick.povUpRight().whileTrue(getPointWheelsAtAngleCommand(-45.0));
+        joystick.povRight().whileTrue(getPointWheelsAtAngleCommand(-90.0));
+        joystick.povDownRight().whileTrue(getPointWheelsAtAngleCommand(-135.0));
+        joystick.povDown().whileTrue(getPointWheelsAtAngleCommand(180.0));
+        joystick.povDownLeft().whileTrue(getPointWheelsAtAngleCommand(135.0));
+        joystick.povLeft().whileTrue(getPointWheelsAtAngleCommand(90.0));
+        joystick.povUpLeft().whileTrue(getPointWheelsAtAngleCommand(45.0));
 
         // Run SysId routines when holding back/start and X/Y.
         // Note that each routine should be run exactly once in a single log.
@@ -112,6 +147,7 @@ public class RobotContainer {
 
         // Reset the field-centric heading on left bumper press.
         joystick.leftBumper().onTrue(drivetrain.runOnce(drivetrain::seedFieldCentric));
+        joystick.rightBumper().whileTrue(getDriveAssistCommand());
 
         // Subsystems controller (1): triggers, bumpers, buttons, D-pad
         subsystems.rightTrigger().whileTrue(
@@ -126,8 +162,10 @@ public class RobotContainer {
         );
         subsystems.leftTrigger().whileTrue(intakeCommands.getIntakeCommand());
 
-        subsystems.y().onTrue(intakeCommands.getPivotToStowCommand());
-        subsystems.a().onTrue(intakeCommands.getPivotToDeployCommand());
+        // Intake pivot: Y = stow (up), B = collect (down), Y+B = homing toward stow (combo-safe)
+        subsystems.y().and(subsystems.b().negate()).onTrue(intakeCommands.getPivotToStowCommand());
+        subsystems.b().and(subsystems.y().negate()).onTrue(intakeCommands.getPivotToCollectCommand());
+        subsystems.y().and(subsystems.b()).onTrue(intakeCommands.getPivotHomingCommand());
 
         subsystems.rightBumper().whileTrue(shooterCommands.getReverseShooterCommand());
         subsystems.leftBumper().whileTrue(intakeCommands.getSpitOutCommand());
@@ -139,7 +177,7 @@ public class RobotContainer {
 
         drivetrain.registerTelemetry(state -> {
             logger.telemeterize(state);
-            // knnInterpreter.update(state.Pose);
+            knnInterpreter.update(state.Pose);
         });
     }
 
@@ -159,5 +197,10 @@ public class RobotContainer {
     /** Hood homing for real robot; schedule when enabling (auto or teleop). */
     public Command getHoodHomingCommand() {
         return shooterCommands.getHoodHomingCommand();
+    }
+
+    /** Intake pivot homing for real robot; schedule when enabling (auto or teleop). */
+    public Command getPivotHomingCommand() {
+        return intakeCommands.getPivotHomingCommand();
     }
 }

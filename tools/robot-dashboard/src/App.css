@@ -987,6 +987,28 @@
   background: rgba(42, 58, 92, 0.3);
 }
 
+.knn-point-input {
+  width: 88px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #31415f;
+  background: #111827;
+  color: #f6f7ff;
+}
+
+.knn-row-delete {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(127, 29, 29, 0.22);
+  color: #fecaca;
+  cursor: pointer;
+}
+
+.knn-row-delete:hover {
+  background: rgba(127, 29, 29, 0.34);
+}
+
 @media (max-width: 980px) {
   .field-panel {
     grid-column: span 1;

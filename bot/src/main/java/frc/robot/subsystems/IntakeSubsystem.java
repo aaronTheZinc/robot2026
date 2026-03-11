@@ -7,10 +7,8 @@ package frc.robot.subsystems;
 import com.revrobotics.RelativeEncoder;
 import com.revrobotics.PersistMode;
 import com.revrobotics.ResetMode;
-import com.revrobotics.spark.SparkBase.ControlType;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
 import com.revrobotics.spark.SparkMax;
-import com.revrobotics.spark.config.ClosedLoopConfig;
 import com.revrobotics.spark.config.SparkBaseConfig;
 import com.revrobotics.spark.config.SparkMaxConfig;
 
@@ -20,7 +18,7 @@ import frc.robot.IntakeConstants;
 
 /**
  * Intake with 3 SPARK MAXs (REV 2026 Spark API):
- * - Pivot: up/down (position control for stow, collect, intake, outtake).
+ * - Pivot: up/down via mechanical stops (homing at enable, then stow/collect open-loop + stall detect).
  * - Roller: in/out (duty cycle for intaking/outtaking).
  * - Hopper: feeds game pieces to the shooter.
  */
@@ -34,15 +32,15 @@ public class IntakeSubsystem extends SubsystemBase {
 
     private final RelativeEncoder pivotEncoder = pivotMotor.getEncoder();
 
-    /** After stall-based travel: true = at stow (up), false = at deploy (down), null = unknown. */
+    /** True after pivot has homed to stow stop this enable (mirrors hood shooterReady). */
+    private boolean pivotReady;
+
+    /** After stall-based travel: true = at stow (up), false = at collect (down), null = unknown. */
     private Boolean pivotStowed = null;
 
     public IntakeSubsystem() {
         var pivotConfig = new SparkMaxConfig()
-                .idleMode(SparkBaseConfig.IdleMode.kBrake)
-                .apply(new ClosedLoopConfig()
-                        .pid(IntakeConstants.kPivotKp, IntakeConstants.kPivotKi, IntakeConstants.kPivotKd)
-                        .outputRange(-1.0, 1.0));
+                .idleMode(SparkBaseConfig.IdleMode.kBrake);
         pivotMotor.configure(pivotConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
 
         var rollerConfig = new SparkMaxConfig()
@@ -57,37 +55,45 @@ public class IntakeSubsystem extends SubsystemBase {
     @Override
     public void periodic() {
         SmartDashboard.putNumber("Intake/PivotRotations", getPivotRotations());
+        SmartDashboard.putBoolean("Intake/PivotReady", pivotReady);
     }
 
-    // ----- Pivot (up/down) positions -----
+    // ----- Pivot (up/down) — mechanical stops, no encoder setpoints -----
 
-    /** Set pivot to stow position (retracted). */
-    public void setPivotStow() {
-        // pivotMotor.set(-1);
-        // pivotMotor.getClosedLoopController().setSetpoint(
-        //         IntakeConstants.kPivotStowRotations, ControlType.kPosition);
+    /** Whether the pivot has been homed this enable (stow stop found and encoder zeroed). */
+    public boolean isPivotReady() {
+        return pivotReady;
     }
 
-    /** Set pivot to collect position (deployed to pick from floor). */
-    public void setPivotCollect() {
-        // pivotMotor.set(0.3);
-        // pivotMotor.getClosedLoopController().setSetpoint(
-        //         IntakeConstants.kPivotCollectRotations, ControlType.kPosition);
+    /** Set by homing command when stow stop is reached; cleared when disabled. */
+    public void setPivotReady(boolean ready) {
+        pivotReady = ready;
+        if (!ready) {
+            stopPivot();
+        }
     }
 
-    /** Set pivot to intake position. */
-    public void setPivotIntake() {
-        pivotMotor.getClosedLoopController().setSetpoint(
-                IntakeConstants.kPivotIntakeRotations, ControlType.kPosition);
+    /** Zero the pivot encoder (call when at stow mechanical stop after homing). */
+    public void zeroPivotPosition() {
+        pivotEncoder.setPosition(0);
     }
 
-    /** Set pivot to outtake position. */
-    public void setPivotOuttake() {
-        pivotMotor.getClosedLoopController().setSetpoint(
-                IntakeConstants.kPivotOuttakeRotations, ControlType.kPosition);
+    /** Run pivot slowly toward stow for homing (init / Y+B). */
+    public void setPivotTowardStowHoming() {
+        pivotMotor.set(IntakeConstants.kPivotHomingSpeed);
     }
 
-    /** Get current pivot position in motor rotations. */
+    /** Run pivot toward stow (up) at normal travel speed. */
+    public void setPivotTowardStow() {
+        pivotMotor.set(IntakeConstants.kPivotStowSpeed);
+    }
+
+    /** Run pivot toward collect (down) at normal travel speed. */
+    public void setPivotTowardCollect() {
+        pivotMotor.set(IntakeConstants.kPivotCollectSpeed);
+    }
+
+    /** Get current pivot position in motor rotations (for telemetry; position control is stop-based). */
     public double getPivotRotations() {
         return pivotEncoder.getPosition();
     }
@@ -123,16 +129,6 @@ public class IntakeSubsystem extends SubsystemBase {
         pivotMotor.set(Math.max(-1, Math.min(1, speed)));
     }
 
-    /** Run pivot toward stow (up) at configured speed. Used by stall-based command. */
-    public void setPivotTowardStow() {
-        pivotMotor.set(IntakeConstants.kPivotStowSpeed);
-    }
-
-    /** Run pivot toward deploy (down) at configured speed. Used by stall-based command. */
-    public void setPivotTowardDeploy() {
-        pivotMotor.set(IntakeConstants.kPivotDeploySpeed);
-    }
-
     /** Stop pivot motor. */
     public void stopPivot() {
         pivotMotor.set(0);
@@ -143,12 +139,12 @@ public class IntakeSubsystem extends SubsystemBase {
         return pivotMotor.getOutputCurrent();
     }
 
-    /** Whether pivot is considered at stow (true), deploy (false), or unknown (null). */
+    /** Whether pivot is considered at stow (true), collect (false), or unknown (null). */
     public Boolean isPivotStowed() {
         return pivotStowed;
     }
 
-    /** Mark pivot state after hitting mechanical stop (stow = true, deploy = false). */
+    /** Mark pivot state after hitting mechanical stop (stow = true, collect = false). */
     public void setPivotStowed(Boolean stowed) {
         pivotStowed = stowed;
     }
@@ -193,16 +189,14 @@ public class IntakeSubsystem extends SubsystemBase {
         stopHopper();
     }
 
-    /** Stow: pivot up, stop roller and hopper. */
+    /** Stow: stop roller and hopper; pivot motion is done by getPivotToStowCommand(). */
     public void stow() {
-        setPivotStow();
         stopRoller();
         stopHopper();
     }
 
-    /** Collect: pivot to collect position, roller and hopper stopped (ready to run intake). */
+    /** Collect: stop roller and hopper; pivot motion is done by getPivotToCollectCommand(). */
     public void collect() {
-        setPivotCollect();
         stopRoller();
         stopHopper();
     }
