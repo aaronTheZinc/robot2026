@@ -77,7 +77,7 @@ public class RobotContainer {
         // and Y is defined as to the left according to WPILib convention.
         Command driveCommand = drivetrain.applyRequest(() ->
             drive.withVelocityX(-joystick.getLeftY() * MaxSpeed) // Drive forward with negative Y (forward)
-                .withVelocityY(-joystick.getLeftX() * MaxSpeed) // Drive left with negative X (left)
+                .withVelocityY(joystick.getLeftX() * MaxSpeed) // Drive left with negative X (left)
                 .withRotationalRate(-joystick.getRightX() * MaxAngularRate) // Drive counterclockwise with negative X (left)
         );
         // Chassis default runs on drivetrain only; no vision requirement so teleop is uninterrupted.
