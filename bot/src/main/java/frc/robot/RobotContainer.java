@@ -11,6 +11,7 @@ import com.ctre.phoenix6.swerve.SwerveRequest;
 
 import com.pathplanner.lib.auto.AutoBuilder;
 
+import edu.wpi.first.math.filter.SlewRateLimiter;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
@@ -34,6 +35,8 @@ public class RobotContainer {
     private static final String kDriveAssistTargetXKey = "Drive Assist/Target X (m)";
     private static final String kDriveAssistTargetYKey = "Drive Assist/Target Y (m)";
     private static final String kDriveAssistTargetHeadingKey = "Drive Assist/Target Heading (deg)";
+    private static final double kChassisTranslationRampRateMpsPerSec = 2.5;
+    private static final double kChassisRotationRampRateRadPerSec2 = 5.0;
     private static final double kShotRampSeconds = 1.0;
     private static final double kAutoShotFeedSeconds = 2;
     private double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
@@ -51,6 +54,9 @@ public class RobotContainer {
 
     private final CommandXboxController joystick = new CommandXboxController(0);
     private final CommandXboxController subsystems = new CommandXboxController(1);
+    private final SlewRateLimiter xSpeedLimiter = new SlewRateLimiter(kChassisTranslationRampRateMpsPerSec);
+    private final SlewRateLimiter ySpeedLimiter = new SlewRateLimiter(kChassisTranslationRampRateMpsPerSec);
+    private final SlewRateLimiter omegaLimiter = new SlewRateLimiter(kChassisRotationRampRateRadPerSec2);
 
     public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
     /** Fuses Limelight pose estimates with drivetrain odometry when running periodically. */
@@ -177,11 +183,15 @@ public class RobotContainer {
     private void configureBindings() {
         // Note that X is defined as forward according to WPILib convention,
         // and Y is defined as to the left according to WPILib convention.
-        Command driveCommand = drivetrain.applyRequest(() ->
-            drive.withVelocityX(-joystick.getLeftY() * MaxSpeed) // Drive forward with negative Y (forward)
-                .withVelocityY(-joystick.getLeftX() * MaxSpeed) // Drive left with negative X (left)
-                .withRotationalRate(-joystick.getRightX() * MaxAngularRate) // Drive counterclockwise with negative X (left)
-        );
+        Command driveCommand = drivetrain.applyRequest(() -> {
+            double limitedX = xSpeedLimiter.calculate(-joystick.getLeftY() * MaxSpeed);
+            double limitedY = ySpeedLimiter.calculate(-joystick.getLeftX() * MaxSpeed);
+            double limitedOmega = omegaLimiter.calculate(-joystick.getRightX() * MaxAngularRate);
+
+            return drive.withVelocityX(limitedX) // Drive forward with negative Y (forward)
+                .withVelocityY(limitedY) // Drive left with negative X (left)
+                .withRotationalRate(limitedOmega); // Drive counterclockwise with negative X (left)
+        });
         // Chassis default runs on drivetrain only; no vision requirement so teleop is uninterrupted.
         drivetrain.setDefaultCommand(driveCommand);
     
