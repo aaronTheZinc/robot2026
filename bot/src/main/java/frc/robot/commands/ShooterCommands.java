@@ -35,6 +35,32 @@ public class ShooterCommands {
                 .finallyDo(shooter::stopShooter);
     }
 
+    public Command getRunShotProfileCommand(double hoodAngleDeg, double rpm) {
+        return Commands.run(
+                () -> {
+                    shooter.setDashboardSetpointControlEnabled(false);
+                    shooter.setHoodAngle(hoodAngleDeg);
+                    shooter.setShooterRpm(rpm);
+                },
+                shooter)
+                .finallyDo(() -> {
+                    shooter.stopShooter();
+                    shooter.setDashboardSetpointControlEnabled(true);
+                });
+    }
+
+    public Command getRunWingShotCommand() {
+        return getRunShotProfileCommand(
+                ShooterConstants.kWingShotHoodAngleDeg,
+                ShooterConstants.kWingShotRpm);
+    }
+
+    public Command getRunCenterShotCommand() {
+        return getRunShotProfileCommand(
+                ShooterConstants.kLeftBumperShotHoodAngleDeg,
+                ShooterConstants.kLeftBumperShotRpm);
+    }
+
     public Command getRunShooterCommandTest() {
         return getRunShooterVoltageCommand(ShooterConstants.kTestSpeed);
     }

@@ -66,6 +66,7 @@ public class Robot extends TimedRobot {
     @Override
     public void disabledInit() {
         m_robotContainer.getShooter().setShooterReady(false);
+        m_robotContainer.getIntake().setPivotReady(false);
     }
 
     @Override
@@ -84,8 +85,10 @@ public class Robot extends TimedRobot {
 
         if (Utils.isSimulation()) {
             m_robotContainer.getShooter().setShooterReady(true);
+            m_robotContainer.getIntake().setPivotReady(true);
         } else {
             CommandScheduler.getInstance().schedule(m_robotContainer.getHoodHomingCommand());
+            CommandScheduler.getInstance().schedule(m_robotContainer.getPivotHomingCommand());
         }
     }
 
@@ -105,8 +108,10 @@ public class Robot extends TimedRobot {
 
         if (Utils.isSimulation()) {
             m_robotContainer.getShooter().setShooterReady(true);
+            m_robotContainer.getIntake().setPivotReady(true);
         } else {
             CommandScheduler.getInstance().schedule(m_robotContainer.getHoodHomingCommand());
+            CommandScheduler.getInstance().schedule(m_robotContainer.getPivotHomingCommand());
         }
     }
 

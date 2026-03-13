@@ -34,6 +34,8 @@ public class RobotContainer {
     private static final String kDriveAssistTargetXKey = "Drive Assist/Target X (m)";
     private static final String kDriveAssistTargetYKey = "Drive Assist/Target Y (m)";
     private static final String kDriveAssistTargetHeadingKey = "Drive Assist/Target Heading (deg)";
+    private static final double kShotRampSeconds = 1.0;
+    private static final double kShotFeedSeconds = 1.5;
     private double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
     private double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond); // 3/4 of a rotation per second max angular velocity
 
@@ -63,6 +65,7 @@ public class RobotContainer {
 
     public RobotContainer() {
         autoChooser = AutoBuilder.buildAutoChooser("Tests");
+        autoChooser.setDefaultOption("Basic Shoot Auto", getBasicShootAutoCommand());
         SmartDashboard.putData("Auto Mode", autoChooser);
 
         // Debug: adjustable hood and shooter setpoints (run from SmartDashboard / robot dashboard)
@@ -76,6 +79,41 @@ public class RobotContainer {
         SmartDashboard.putNumber(kDriveAssistTargetHeadingKey, 0.0);
 
         configureBindings();
+    }
+
+    private Command getBasicShootAutoCommand() {
+        return getCenterFullShotSequenceCommand();
+    }
+
+    private Command getFullShotSequenceCommand(boolean wingShot) {
+        Command rampShot = wingShot
+            ? shooterCommands.getRunWingShotCommand()
+            : shooterCommands.getRunCenterShotCommand();
+        Command feedShot = wingShot
+            ? shooterCommands.getRunWingShotCommand()
+            : shooterCommands.getRunCenterShotCommand();
+        return Commands.sequence(
+            intakeCommands.getStopHopperCommand(),
+            Commands.deadline(
+                Commands.waitSeconds(kShotRampSeconds),
+                rampShot
+            ),
+            Commands.deadline(
+                Commands.waitSeconds(kShotFeedSeconds),
+                Commands.parallel(
+                    feedShot,
+                    intakeCommands.getFeedToShooterCommand()
+                )
+            )
+        ).finallyDo(() -> intake.stopHopper());
+    }
+
+    private Command getCenterFullShotSequenceCommand() {
+        return getFullShotSequenceCommand(false);
+    }
+
+    private Command getWingFullShotSequenceCommand() {
+        return getFullShotSequenceCommand(true);
     }
 
     private Pose2d getDriveAssistTargetPose() {
@@ -147,28 +185,25 @@ public class RobotContainer {
 
         // Reset the field-centric heading on left bumper press.
         joystick.leftBumper().onTrue(drivetrain.runOnce(drivetrain::seedFieldCentric));
-        joystick.rightBumper().whileTrue(getDriveAssistCommand());
+        // joystick.rightBumper().whileTrue(getDriveAssistCommand());
 
         // Subsystems controller (1): triggers, bumpers, buttons, D-pad
-        subsystems.rightTrigger().whileTrue(
-            Commands.parallel(
-                shooterCommands.getRunShooterCommand(),
-                Commands.sequence(
-                    intakeCommands.getStopHopperCommand(),
-                    Commands.waitSeconds(1.0),
-                    intakeCommands.getFeedToShooterCommand()
-                )
-            ).finallyDo(() -> intake.stopHopper())
-        );
-        subsystems.leftTrigger().whileTrue(intakeCommands.getIntakeCommand());
+        // R2: reverse shooter while held
+        subsystems.rightTrigger().whileTrue(shooterCommands.getReverseShooterCommand());
+        // L1: collect with intake while held
+        subsystems.leftBumper().whileTrue(intakeCommands.getIntakeCommand());
+        // L2: reverse intake while held
+        subsystems.leftTrigger().whileTrue(intakeCommands.getSpitOutCommand());
 
-        // Intake pivot: Y = stow (up), B = collect (down), Y+B = homing toward stow (combo-safe)
-        subsystems.y().and(subsystems.b().negate()).onTrue(intakeCommands.getPivotToStowCommand());
-        subsystems.b().and(subsystems.y().negate()).onTrue(intakeCommands.getPivotToCollectCommand());
-        subsystems.y().and(subsystems.b()).onTrue(intakeCommands.getPivotHomingCommand());
+        // A: full center shot sequence (ramp then feed), B: full wing shot sequence (ramp then feed)
+        subsystems.a().onTrue(getCenterFullShotSequenceCommand());
+        subsystems.b().onTrue(getWingFullShotSequenceCommand());
 
-        subsystems.rightBumper().whileTrue(shooterCommands.getReverseShooterCommand());
-        subsystems.leftBumper().whileTrue(intakeCommands.getSpitOutCommand());
+        // Intake pivot manual: Y = stow (up) while held, X = collect (down) while held.
+        // Use Start+Y for homing to mechanical stow stop to avoid overlap with shot button B.
+        subsystems.y().and(subsystems.b().negate()).whileTrue(intakeCommands.getPivotTowardStowManualCommand());
+        subsystems.x().whileTrue(intakeCommands.getPivotTowardCollectManualCommand());
+        subsystems.start().and(subsystems.y()).onTrue(intakeCommands.getPivotHomingCommand());
 
         subsystems.povUp().onTrue(shooterCommands.getIncrementHoodDegreesCommand());
         subsystems.povDown().onTrue(shooterCommands.getDecrementHoodDegreesCommand());

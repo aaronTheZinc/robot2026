@@ -69,6 +69,15 @@ public final class ShooterConstants {
     /** Default RPM setpoint when using velocity control (e.g. for testing). */
     public static final double kShooterDefaultRpmSetpoint = 3000.0;
 
+    /** Wing shot profile: hood angle (deg). */
+    public static final double kWingShotHoodAngleDeg = 20.0;
+    /** Wing shot profile: shooter wheel speed (RPM). */
+    public static final double kWingShotRpm = 4100.0;
+    /** Left bumper shot profile: hood angle (deg). */
+    public static final double kLeftBumperShotHoodAngleDeg = 10.0;
+    /** Left bumper shot profile: shooter wheel speed (RPM). */
+    public static final double kLeftBumperShotRpm = 3000.0;
+
     /** Shooter velocity PID gains (slot 0). Tune for your mechanism. */
     public static final double kShooterKp = 0.15;
     public static final double kShooterKi = 0.0;
