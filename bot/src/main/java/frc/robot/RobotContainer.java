@@ -35,7 +35,7 @@ public class RobotContainer {
     private static final String kDriveAssistTargetYKey = "Drive Assist/Target Y (m)";
     private static final String kDriveAssistTargetHeadingKey = "Drive Assist/Target Heading (deg)";
     private static final double kShotRampSeconds = 1.0;
-    private static final double kShotFeedSeconds = 5;
+    private static final double kAutoShotFeedSeconds = 8.0;
     private double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
     private double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond); // 3/4 of a rotation per second max angular velocity
 
@@ -82,10 +82,10 @@ public class RobotContainer {
     }
 
     private Command getBasicShootAutoCommand() {
-        return getCenterFullShotSequenceCommand();
+        return getCenterAutoShotSequenceCommand();
     }
 
-    private Command getFullShotSequenceCommand(boolean wingShot) {
+    private Command getAutoShotSequenceCommand(boolean wingShot) {
         Command rampShot = wingShot
             ? shooterCommands.getRunWingShotCommand()
             : shooterCommands.getRunCenterShotCommand();
@@ -99,7 +99,7 @@ public class RobotContainer {
                 rampShot
             ),
             Commands.deadline(
-                Commands.waitSeconds(kShotFeedSeconds),
+                Commands.waitSeconds(kAutoShotFeedSeconds),
                 Commands.parallel(
                     feedShot,
                     intakeCommands.getFeedToShooterCommand()
@@ -108,12 +108,36 @@ public class RobotContainer {
         ).finallyDo(() -> intake.stopHopper());
     }
 
-    private Command getCenterFullShotSequenceCommand() {
-        return getFullShotSequenceCommand(false);
+    private Command getHeldShotSequenceCommand(boolean wingShot) {
+        Command rampShot = wingShot
+            ? shooterCommands.getRunWingShotCommand()
+            : shooterCommands.getRunCenterShotCommand();
+        Command feedShot = wingShot
+            ? shooterCommands.getRunWingShotCommand()
+            : shooterCommands.getRunCenterShotCommand();
+        return Commands.sequence(
+            intakeCommands.getStopHopperCommand(),
+            Commands.deadline(
+                Commands.waitSeconds(kShotRampSeconds),
+                rampShot
+            ),
+            Commands.parallel(
+                feedShot,
+                intakeCommands.getFeedToShooterCommand()
+            )
+        ).finallyDo(() -> intake.stopHopper());
     }
 
-    private Command getWingFullShotSequenceCommand() {
-        return getFullShotSequenceCommand(true);
+    private Command getCenterAutoShotSequenceCommand() {
+        return getAutoShotSequenceCommand(false);
+    }
+
+    private Command getCenterHeldShotSequenceCommand() {
+        return getHeldShotSequenceCommand(false);
+    }
+
+    private Command getWingHeldShotSequenceCommand() {
+        return getHeldShotSequenceCommand(true);
     }
 
     private Pose2d getDriveAssistTargetPose() {
@@ -201,9 +225,9 @@ public class RobotContainer {
         // L2: reverse intake while held
         subsystems.leftTrigger().whileTrue(intakeCommands.getSpitOutCommand());
 
-        // A: full center shot sequence (ramp then feed), B: full wing shot sequence (ramp then feed)
-        subsystems.a().onTrue(getCenterFullShotSequenceCommand());
-        subsystems.b().onTrue(getWingFullShotSequenceCommand());
+        // A/B: run shot sequence while held (ramp then feed, stop on release).
+        subsystems.a().whileTrue(getCenterHeldShotSequenceCommand());
+        subsystems.b().whileTrue(getWingHeldShotSequenceCommand());
 
         // Intake pivot manual: Y = stow (up) while held, X = collect (down) while held.
         // Use Start+Y for homing to mechanical stow stop to avoid overlap with shot button B.
@@ -224,7 +248,7 @@ public class RobotContainer {
 
     public Command getAutonomousCommand() {
         /* Run the path selected from the auto chooser */
-        return getCenterFullShotSequenceCommand();
+        return getCenterAutoShotSequenceCommand();
     }
 
     public ShooterSubsystem getShooter() {
