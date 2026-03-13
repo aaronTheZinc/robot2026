@@ -54,6 +54,9 @@ public class Robot extends TimedRobot {
                 PortForwarder.add(port, LIMELIGHT_HOST, port);
             }
         }
+
+        m_robotContainer.flipDriveDirection();
+
     }
 
     @Override

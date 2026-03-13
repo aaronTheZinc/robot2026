@@ -166,12 +166,20 @@ public class RobotContainer {
         return drivetrain.applyRequest(() -> point.withModuleDirection(direction));
     }
 
+    public void flipDriveDirection() {
+            Pose2d currentPose = drivetrain.getState().Pose;
+            drivetrain.resetPose(new Pose2d(
+                currentPose.getTranslation(),
+                currentPose.getRotation().plus(Rotation2d.k180deg)
+            ));
+    }
+
     private void configureBindings() {
         // Note that X is defined as forward according to WPILib convention,
         // and Y is defined as to the left according to WPILib convention.
         Command driveCommand = drivetrain.applyRequest(() ->
             drive.withVelocityX(-joystick.getLeftY() * MaxSpeed) // Drive forward with negative Y (forward)
-                .withVelocityY(joystick.getLeftX() * MaxSpeed) // Drive left with negative X (left)
+                .withVelocityY(-joystick.getLeftX() * MaxSpeed) // Drive left with negative X (left)
                 .withRotationalRate(-joystick.getRightX() * MaxAngularRate) // Drive counterclockwise with negative X (left)
         );
         // Chassis default runs on drivetrain only; no vision requirement so teleop is uninterrupted.
