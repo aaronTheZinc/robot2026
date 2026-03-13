@@ -15,6 +15,7 @@ public class IntakeCommands {
     public Command getIntakeCommand() {
         return Commands.run(intake::intake, intake)
                 .finallyDo(() -> {
+                    intake.stopPivot();
                     intake.stopRoller();
                     intake.stopHopper();
                 });
@@ -27,6 +28,16 @@ public class IntakeCommands {
 
     public Command getStopHopperCommand() {
         return Commands.runOnce(intake::stopHopper, intake);
+    }
+
+    public Command getPivotTowardStowManualCommand() {
+        return Commands.run(intake::setPivotTowardStow, intake)
+                .finallyDo(intake::stopPivot);
+    }
+
+    public Command getPivotTowardCollectManualCommand() {
+        return Commands.run(intake::setPivotTowardCollect, intake)
+                .finallyDo(intake::stopPivot);
     }
 
     /**
@@ -116,4 +127,5 @@ public class IntakeCommands {
                     intake.stopHopper();
                 });
     }
+
 }

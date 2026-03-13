@@ -49,6 +49,8 @@ public class ShooterSubsystem extends SubsystemBase {
 
     /** Stored shooter RPM setpoint; 0 means open-loop / stopped. */
     private double shooterRpmSetpoint = 0;
+    /** True when slider/NetworkTables setpoint inputs should drive hood/RPM setpoints. */
+    private boolean dashboardSetpointControlEnabled = true;
 
     private final NetworkTable shooterTable =
             NetworkTableInstance.getDefault().getTable("Shooter");
@@ -141,6 +143,11 @@ public class ShooterSubsystem extends SubsystemBase {
     /** Current shooter RPM setpoint (0 when in open-loop). */
     public double getShooterRpmSetpoint() {
         return shooterRpmSetpoint;
+    }
+
+    /** Enable/disable dashboard-setpoint ownership of hood and shooter RPM setpoints. */
+    public void setDashboardSetpointControlEnabled(boolean enabled) {
+        dashboardSetpointControlEnabled = enabled;
     }
 
     /** Average measured RPM of left and right shooter wheels (closed-loop velocity feedback). */
@@ -286,14 +293,16 @@ public class ShooterSubsystem extends SubsystemBase {
 
     @Override
     public void periodic() {
-        // Apply setpoints from slider input: robot-dashboard (NT) takes priority, else SmartDashboard sliders
-        double hoodInput = shooterTable.getEntry("hoodSetpointInput").getDouble(Double.NaN);
-        double hoodToApply = Double.isNaN(hoodInput) ? hoodSliderEntry.getDouble(hoodSetpointDeg) : hoodInput;
-        setHoodAngle(hoodToApply);
+        if (dashboardSetpointControlEnabled) {
+            // Apply setpoints from slider input: robot-dashboard (NT) takes priority, else SmartDashboard sliders
+            double hoodInput = shooterTable.getEntry("hoodSetpointInput").getDouble(Double.NaN);
+            double hoodToApply = Double.isNaN(hoodInput) ? hoodSliderEntry.getDouble(hoodSetpointDeg) : hoodInput;
+            setHoodAngle(hoodToApply);
 
-        double rpmInput = shooterTable.getEntry("rpmSetpointInput").getDouble(Double.NaN);
-        double rpmToApply = Double.isNaN(rpmInput) ? rpmSliderEntry.getDouble(shooterRpmSetpoint) : rpmInput;
-        setShooterRpm(rpmToApply);
+            double rpmInput = shooterTable.getEntry("rpmSetpointInput").getDouble(Double.NaN);
+            double rpmToApply = Double.isNaN(rpmInput) ? rpmSliderEntry.getDouble(shooterRpmSetpoint) : rpmInput;
+            setShooterRpm(rpmToApply);
+        }
 
         if (shooterRpmSetpoint != 0) {
             double rps = shooterRpmSetpoint / 60.0;

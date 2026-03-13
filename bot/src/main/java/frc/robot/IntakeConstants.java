@@ -28,6 +28,10 @@ public final class IntakeConstants {
     public static final double kPivotKp = 0.5;
     public static final double kPivotKi = 0.0;
     public static final double kPivotKd = 0.02;
+    /** Max normalized output used by software PID for pivot position hold. */
+    public static final double kPivotPidMaxOutput = 0.5;
+    /** Error tolerance (motor rotations) for considering pivot at setpoint in PID mode. */
+    public static final double kPivotPidToleranceRotations = 0.02;
 
     /** Roller speed [-1, 1] when intaking (positive = pull in). */
     public static final double kRollerIntakeSpeed = -0.8;

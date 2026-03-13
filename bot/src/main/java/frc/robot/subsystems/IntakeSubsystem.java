@@ -85,11 +85,17 @@ public class IntakeSubsystem extends SubsystemBase {
 
     /** Run pivot toward stow (up) at normal travel speed. */
     public void setPivotTowardStow() {
+        // if (!pivotReady) {
+        //     return;
+        // }
         pivotMotor.set(IntakeConstants.kPivotStowSpeed);
     }
 
     /** Run pivot toward collect (down) at normal travel speed. */
     public void setPivotTowardCollect() {
+        // if (!pivotReady) {
+        //     return;
+        // }
         pivotMotor.set(IntakeConstants.kPivotCollectSpeed);
     }
 
@@ -177,7 +183,7 @@ public class IntakeSubsystem extends SubsystemBase {
 
     /** Intake: pivot to intake position, run roller in, hopper off (or run if feeding). */
     public void intake() {
-        // setPivotIntake();
+        setPivotTowardCollect();
         runRollerIntake();
         stopHopper();
     }
