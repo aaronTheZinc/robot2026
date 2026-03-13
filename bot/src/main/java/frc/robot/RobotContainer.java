@@ -183,8 +183,14 @@ public class RobotContainer {
         joystick.start().and(joystick.y()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kForward));
         joystick.start().and(joystick.x()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kReverse));
 
-        // Reset the field-centric heading on left bumper press.
-        joystick.leftBumper().onTrue(drivetrain.runOnce(drivetrain::seedFieldCentric));
+        // Reset field-centric heading with a 180-degree offset on left bumper press.
+        joystick.leftBumper().onTrue(drivetrain.runOnce(() -> {
+            Pose2d currentPose = drivetrain.getState().Pose;
+            drivetrain.resetPose(new Pose2d(
+                currentPose.getTranslation(),
+                currentPose.getRotation().plus(Rotation2d.k180deg)
+            ));
+        }));
         // joystick.rightBumper().whileTrue(getDriveAssistCommand());
 
         // Subsystems controller (1): triggers, bumpers, buttons, D-pad
