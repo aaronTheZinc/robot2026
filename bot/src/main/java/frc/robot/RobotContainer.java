@@ -35,7 +35,7 @@ public class RobotContainer {
     private static final String kDriveAssistTargetYKey = "Drive Assist/Target Y (m)";
     private static final String kDriveAssistTargetHeadingKey = "Drive Assist/Target Heading (deg)";
     private static final double kShotRampSeconds = 1.0;
-    private static final double kShotFeedSeconds = 1.5;
+    private static final double kShotFeedSeconds = 5;
     private double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
     private double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond); // 3/4 of a rotation per second max angular velocity
 
@@ -224,7 +224,7 @@ public class RobotContainer {
 
     public Command getAutonomousCommand() {
         /* Run the path selected from the auto chooser */
-        return autoChooser.getSelected();
+        return getCenterFullShotSequenceCommand();
     }
 
     public ShooterSubsystem getShooter() {
