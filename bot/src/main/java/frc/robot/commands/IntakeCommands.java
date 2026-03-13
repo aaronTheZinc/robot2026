@@ -13,12 +13,12 @@ public class IntakeCommands {
     }
 
     public Command getIntakeCommand() {
-        return Commands.run(intake::intake, intake)
-                .finallyDo(() -> {
-                    intake.stopPivot();
-                    intake.stopRoller();
-                    intake.stopHopper();
-                });
+        return Commands.run(intake::intake, intake);
+                // .finallyDo(() -> {
+                //     intake.stopPivot();
+                //     intake.stopRoller();
+                //     intake.stopHopper();
+                // });
     }
 
     public Command getFeedToShooterCommand() {

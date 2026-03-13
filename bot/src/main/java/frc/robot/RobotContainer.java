@@ -35,7 +35,7 @@ public class RobotContainer {
     private static final String kDriveAssistTargetYKey = "Drive Assist/Target Y (m)";
     private static final String kDriveAssistTargetHeadingKey = "Drive Assist/Target Heading (deg)";
     private static final double kShotRampSeconds = 1.0;
-    private static final double kAutoShotFeedSeconds = 8.0;
+    private static final double kAutoShotFeedSeconds = 2;
     private double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
     private double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond); // 3/4 of a rotation per second max angular velocity
 
