@@ -76,7 +76,7 @@ public final class ShooterConstants {
     /** Left bumper shot profile: hood angle (deg). */
     public static final double kLeftBumperShotHoodAngleDeg = 10.0;
     /** Left bumper shot profile: shooter wheel speed (RPM). */
-    public static final double kLeftBumperShotRpm = 3000.0;
+    public static final double kLeftBumperShotRpm = 4100.0;
 
     /** Shooter velocity PID gains (slot 0). Tune for your mechanism. */
     public static final double kShooterKp = 0.15;

@@ -55,7 +55,7 @@ public class Robot extends TimedRobot {
             }
         }
 
-        m_robotContainer.flipDriveDirection();
+        // m_robotContainer.flipDriveDirection();
 
     }
 
