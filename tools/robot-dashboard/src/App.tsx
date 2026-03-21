@@ -14,10 +14,15 @@ import ConnectionScreen from './screens/ConnectionScreen';
 import type { ConnectionConfig, DashboardMode } from './screens/ConnectionScreen';
 import {
   connectRobotStateSubscription,
+  createAutoSelectorPublisher,
   createMotorTestPublisher,
   createShooterSetpointPublisher,
 } from './lib/nt4Client';
-import type { MotorTestPublisher, ShooterSetpointPublisher } from './lib/nt4Client';
+import type {
+  AutoSelectorPublisher,
+  MotorTestPublisher,
+  ShooterSetpointPublisher,
+} from './lib/nt4Client';
 import {
   applyRobotStateUpdate,
   createInitialRobotState,
@@ -255,6 +260,7 @@ function App() {
   const knnLogInputRef = useRef<HTMLInputElement | null>(null);
   const motorTestPublisherRef = useRef<MotorTestPublisher | null>(null);
   const shooterSetpointPublisherRef = useRef<ShooterSetpointPublisher | null>(null);
+  const autoSelectorPublisherRef = useRef<AutoSelectorPublisher | null>(null);
 
   const visibleTabs =
     dashboardMode === 'competition' ? COMPETITION_TABS : DEBUG_TABS;
@@ -421,23 +427,27 @@ function App() {
       }
       motorTestPublisherRef.current = null;
       shooterSetpointPublisherRef.current = null;
+      autoSelectorPublisherRef.current = null;
       return;
     }
     let cancelled = false;
     Promise.all([
       createMotorTestPublisher(uri, port),
       createShooterSetpointPublisher(uri, port),
+      createAutoSelectorPublisher(uri, port),
     ])
-      .then(([motorPub, shooterPub]) => {
+      .then(([motorPub, shooterPub, autoSelectorPub]) => {
         if (!cancelled) {
           motorTestPublisherRef.current = motorPub;
           shooterSetpointPublisherRef.current = shooterPub;
+          autoSelectorPublisherRef.current = autoSelectorPub;
         }
       })
       .catch(() => {
         if (!cancelled) {
           motorTestPublisherRef.current = null;
           shooterSetpointPublisherRef.current = null;
+          autoSelectorPublisherRef.current = null;
         }
       });
     return () => {
@@ -447,6 +457,7 @@ function App() {
       }
       motorTestPublisherRef.current = null;
       shooterSetpointPublisherRef.current = null;
+      autoSelectorPublisherRef.current = null;
     };
   }, [mode, nt4Enabled, state.connected, uri, port]);
 
@@ -640,6 +651,7 @@ function App() {
           nt4Enabled={nt4Enabled}
           mode={mode}
           state={state.autoDebug}
+          onSelectAuto={(autoName) => autoSelectorPublisherRef.current?.setSelectedAuto(autoName)}
         />
       )}
 

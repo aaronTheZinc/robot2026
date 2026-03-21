@@ -272,6 +272,39 @@ const DEFAULT_TOPICS: TopicConfig[] = [
         : null,
   },
   {
+    path: '/SmartDashboard/Auto Mode/options',
+    type: NetworkTablesTypeInfos.kStringArray,
+    defaultValue: [] as string[],
+    map: (value) => {
+      if (!Array.isArray(value)) {
+        return null;
+      }
+      const availableAutos = value.filter((item): item is string => typeof item === 'string');
+      return { autoDebug: { availableAutos } };
+    },
+  },
+  {
+    path: '/SmartDashboard/Auto Mode/selected',
+    type: NetworkTablesTypeInfos.kString,
+    defaultValue: '',
+    map: (value) =>
+      typeof value === 'string' ? { autoDebug: { chooserSelected: value } } : null,
+  },
+  {
+    path: '/SmartDashboard/Auto Mode/active',
+    type: NetworkTablesTypeInfos.kString,
+    defaultValue: '',
+    map: (value) =>
+      typeof value === 'string' ? { autoDebug: { chooserActive: value } } : null,
+  },
+  {
+    path: '/SmartDashboard/Auto Mode/default',
+    type: NetworkTablesTypeInfos.kString,
+    defaultValue: '',
+    map: (value) =>
+      typeof value === 'string' ? { autoDebug: { chooserDefault: value } } : null,
+  },
+  {
     path: '/Auto/lastEvent',
     type: NetworkTablesTypeInfos.kString,
     defaultValue: '',
@@ -284,6 +317,48 @@ const DEFAULT_TOPICS: TopicConfig[] = [
     defaultValue: 0,
     map: (value) =>
       typeof value === 'number' ? { autoDebug: { eventIndex: Math.floor(value) } } : null,
+  },
+  {
+    path: '/Auto/chooserCommandName',
+    type: NetworkTablesTypeInfos.kString,
+    defaultValue: '',
+    map: (value) =>
+      typeof value === 'string' ? { autoDebug: { chooserCommandName: value } } : null,
+  },
+  {
+    path: '/Auto/chooserCommandClass',
+    type: NetworkTablesTypeInfos.kString,
+    defaultValue: '',
+    map: (value) =>
+      typeof value === 'string' ? { autoDebug: { chooserCommandClass: value } } : null,
+  },
+  {
+    path: '/Auto/resolvedAutoCommandName',
+    type: NetworkTablesTypeInfos.kString,
+    defaultValue: '',
+    map: (value) =>
+      typeof value === 'string' ? { autoDebug: { resolvedAutoCommandName: value } } : null,
+  },
+  {
+    path: '/Auto/resolvedAutoCommandClass',
+    type: NetworkTablesTypeInfos.kString,
+    defaultValue: '',
+    map: (value) =>
+      typeof value === 'string' ? { autoDebug: { resolvedAutoCommandClass: value } } : null,
+  },
+  {
+    path: '/Auto/autoUsedChooserFallback',
+    type: NetworkTablesTypeInfos.kBoolean,
+    defaultValue: false,
+    map: (value) =>
+      typeof value === 'boolean' ? { autoDebug: { autoUsedChooserFallback: value } } : null,
+  },
+  {
+    path: '/Auto/defaultDriveCanceledForAuto',
+    type: NetworkTablesTypeInfos.kBoolean,
+    defaultValue: false,
+    map: (value) =>
+      typeof value === 'boolean' ? { autoDebug: { defaultDriveCanceledForAuto: value } } : null,
   },
   {
     path: '/Auto/selectedCommandName',
@@ -312,6 +387,29 @@ const DEFAULT_TOPICS: TopicConfig[] = [
     defaultValue: '',
     map: (value) =>
       typeof value === 'string' ? { autoDebug: { registeredNamedCommands: value } } : null,
+  },
+  {
+    path: '/Auto/autonomousCommandScheduled',
+    type: NetworkTablesTypeInfos.kBoolean,
+    defaultValue: false,
+    map: (value) =>
+      typeof value === 'boolean' ? { autoDebug: { autonomousCommandScheduled: value } } : null,
+  },
+  {
+    path: '/Auto/defaultDriveScheduled',
+    type: NetworkTablesTypeInfos.kBoolean,
+    defaultValue: false,
+    map: (value) =>
+      typeof value === 'boolean' ? { autoDebug: { defaultDriveScheduled: value } } : null,
+  },
+  {
+    path: '/PathFollower/outputInvokeCount',
+    type: NetworkTablesTypeInfos.kInteger,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number'
+        ? { autoDebug: { outputInvokeCount: Math.floor(value) } }
+        : null,
   },
   {
     path: '/PathFollower/pathOutputRecent',
@@ -527,6 +625,7 @@ export async function createMotorTestPublisher(
 
 const SHOOTER_HOOD_SETPOINT_INPUT_PATH = 'Shooter/hoodSetpointInput';
 const SHOOTER_RPM_SETPOINT_INPUT_PATH = 'Shooter/rpmSetpointInput';
+const AUTO_MODE_SELECTED_PATH = 'SmartDashboard/Auto Mode/selected';
 
 export type ShooterSetpointPublisher = {
   setHoodSetpoint: (degrees: number) => void;
@@ -550,5 +649,31 @@ export async function createShooterSetpointPublisher(
   return {
     setHoodSetpoint: (degrees: number) => hoodTopic.setValue(degrees),
     setRpmSetpoint: (rpm: number) => rpmTopic.setValue(rpm),
+  };
+}
+
+export type AutoSelectorPublisher = {
+  setSelectedAuto: (autoName: string) => void;
+};
+
+/**
+ * Creates the writable SendableChooser selected topic so dashboard can request auto changes.
+ * Robot reads SmartDashboard/Auto Mode/selected through the standard SendableChooser API.
+ */
+export async function createAutoSelectorPublisher(
+  uri: string,
+  port: number
+): Promise<AutoSelectorPublisher> {
+  const nt = NetworkTables.getInstanceByURI(uri, port);
+  const selectedTopic = nt.createTopic(
+    AUTO_MODE_SELECTED_PATH,
+    NetworkTablesTypeInfos.kString,
+    '' as string
+  );
+
+  await selectedTopic.publish();
+
+  return {
+    setSelectedAuto: (autoName: string) => selectedTopic.setValue(autoName),
   };
 }

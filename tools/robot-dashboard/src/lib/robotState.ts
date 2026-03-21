@@ -57,8 +57,20 @@ export type RobotState = {
   knnSelectedIndex: number;
   /** PathPlanner / autonomous diagnostics from NT (see AutoDiagnostics.java) */
   autoDebug: {
+    availableAutos: string[];
+    chooserSelected: string;
+    chooserActive: string;
+    chooserDefault: string;
     lastEvent: string;
     eventIndex: number;
+    /** Raw chooser selection at auto init (from robot NT). */
+    chooserCommandName: string;
+    chooserCommandClass: string;
+    /** Command actually scheduled (chooser or PathPlanner fallback). */
+    resolvedAutoCommandName: string;
+    resolvedAutoCommandClass: string;
+    autoUsedChooserFallback: boolean;
+    defaultDriveCanceledForAuto: boolean;
     selectedCommandName: string;
     selectedCommandClass: string;
     driveSubsystemCommand: string;
@@ -78,6 +90,9 @@ export type RobotState = {
     configWheelCOF: number;
     configTransKp: number;
     configRotKp: number;
+    autonomousCommandScheduled: boolean;
+    defaultDriveScheduled: boolean;
+    outputInvokeCount: number;
   };
 };
 
@@ -159,8 +174,18 @@ export function createInitialRobotState(mode: RobotMode): RobotState {
     targets: [],
     knnSelectedIndex: -1,
     autoDebug: {
+      availableAutos: [],
+      chooserSelected: '',
+      chooserActive: '',
+      chooserDefault: '',
       lastEvent: '',
       eventIndex: 0,
+      chooserCommandName: '',
+      chooserCommandClass: '',
+      resolvedAutoCommandName: '',
+      resolvedAutoCommandClass: '',
+      autoUsedChooserFallback: false,
+      defaultDriveCanceledForAuto: false,
       selectedCommandName: '',
       selectedCommandClass: '',
       driveSubsystemCommand: '',
@@ -180,6 +205,9 @@ export function createInitialRobotState(mode: RobotMode): RobotState {
       configWheelCOF: 0,
       configTransKp: 0,
       configRotKp: 0,
+      autonomousCommandScheduled: false,
+      defaultDriveScheduled: false,
+      outputInvokeCount: 0,
     },
   };
 }

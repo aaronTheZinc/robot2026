@@ -90,10 +90,11 @@ public class Robot extends TimedRobot {
     @Override
     public void robotPeriodic() {
         m_timeAndJoystickReplay.update();
-        CommandScheduler.getInstance().run();
+        CommandScheduler cs = CommandScheduler.getInstance();
+        cs.run();
         if (DriverStation.isAutonomous()) {
-            Command requiring = CommandScheduler.getInstance().requiring(m_robotContainer.drivetrain);
-            AutoDiagnostics.publishActiveDriveCommand(requiring);
+            AutoDiagnostics.publishActiveDriveCommand(cs.requiring(m_robotContainer.drivetrain));
+            AutoDiagnostics.publishAutonomousSchedulerSnap(m_autonomousCommand, cs, m_robotContainer.drivetrain);
         }
         // VisionMeasurement subsystem runs in its periodic() and fuses Limelight with drivetrain odometry.
     }
@@ -102,6 +103,7 @@ public class Robot extends TimedRobot {
     public void disabledInit() {
         m_robotContainer.getShooter().setShooterReady(false);
         m_robotContainer.getIntake().setPivotReady(false);
+        AutoDiagnostics.publishDefaultDriveCanceledForAuto(false);
     }
 
     @Override
@@ -112,28 +114,37 @@ public class Robot extends TimedRobot {
 
     @Override
     public void autonomousInit() {
-        m_autonomousCommand = m_robotContainer.getAutonomousCommand();
-
-        if (m_autonomousCommand == null) {
-            DriverStation.reportWarning(
-                    "Auto: SendableChooser returned null — no autonomous command was scheduled.",
-                    false);
-            AutoDiagnostics.logEvent("autonomousInit: selected command is NULL");
-        } else {
-            AutoDiagnostics.logEvent("autonomousInit: schedule " + m_autonomousCommand.getName());
-            SignalLogger.writeString("Auto/scheduledCommand", m_autonomousCommand.getName());
-        }
+        Command selectedAuto = m_robotContainer.getAutonomousCommand();
+        m_autonomousCommand = selectedAuto;
 
         if (Utils.isSimulation()) {
             m_robotContainer.getShooter().setShooterReady(true);
             m_robotContainer.getIntake().setPivotReady(true);
         } else {
-            CommandScheduler.getInstance().schedule(m_robotContainer.getHoodHomingCommand());
+            // In auto on real robot, home hood first, then run selected auto.
+            // This prevents shooter commands in auto from interrupting homing.
+            m_robotContainer.getShooter().setShooterReady(false);
+            if (selectedAuto != null) {
+                m_autonomousCommand = m_robotContainer
+                        .getHoodHomingCommand()
+                        .andThen(selectedAuto)
+                        .withName("AutoWithHoodHoming");
+            } else {
+                m_autonomousCommand = m_robotContainer.getHoodHomingCommand().withName("HoodHomingOnly");
+            }
             // CommandScheduler.getInstance().schedule(m_robotContainer.getPivotHomingCommand());
         }
 
+        // Chassis: match SwerveWithPathPlanner — schedule auto only; subsystem requirements handle the
+        // default drive command.
         if (m_autonomousCommand != null) {
+            AutoDiagnostics.logEvent("autonomousInit: schedule " + m_autonomousCommand.getName());
+            SignalLogger.writeString("Auto/scheduledCommand", m_autonomousCommand.getName());
             CommandScheduler.getInstance().schedule(m_autonomousCommand);
+        } else {
+            DriverStation.reportWarning(
+                    "Auto: SendableChooser returned null — no autonomous command was scheduled.", false);
+            AutoDiagnostics.logEvent("autonomousInit: selected command is NULL");
         }
     }
 
@@ -148,8 +159,6 @@ public class Robot extends TimedRobot {
         if (m_autonomousCommand != null) {
             CommandScheduler.getInstance().cancel(m_autonomousCommand);
         }
-
-        
 
         if (Utils.isSimulation()) {
             m_robotContainer.getShooter().setShooterReady(true);

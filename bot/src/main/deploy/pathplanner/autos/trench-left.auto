@@ -7,7 +7,13 @@
         {
           "type": "path",
           "data": {
-            "pathName": "center-back"
+            "pathName": "trench-left"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "Wing Shot"
           }
         }
       ]

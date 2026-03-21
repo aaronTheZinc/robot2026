@@ -5,6 +5,7 @@ type Props = {
   nt4Enabled: boolean;
   mode: 'mock' | 'nt4';
   state: RobotState['autoDebug'];
+  onSelectAuto: (autoName: string) => void;
 };
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -16,7 +17,7 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default function AutoDebugPanel({ connected, nt4Enabled, mode, state }: Props) {
+export default function AutoDebugPanel({ connected, nt4Enabled, mode, state, onSelectAuto }: Props) {
   const show = mode === 'nt4' && nt4Enabled && connected;
 
   return (
@@ -36,22 +37,83 @@ export default function AutoDebugPanel({ connected, nt4Enabled, mode, state }: P
         )}
         {show && (
           <>
+            <div className="control-row" style={{ marginBottom: '0.75rem' }}>
+              <label>Auto chooser</label>
+              <select
+                value={state.chooserSelected}
+                onChange={(event) => onSelectAuto(event.target.value)}
+                disabled={state.availableAutos.length === 0}
+              >
+                {state.availableAutos.length === 0 ? (
+                  <option value="">No autos published</option>
+                ) : (
+                  state.availableAutos.map((autoName) => (
+                    <option key={autoName} value={autoName}>
+                      {autoName}
+                    </option>
+                  ))
+                )}
+              </select>
+              <span className="nt-value">
+                Active: {state.chooserActive || '—'} | Default: {state.chooserDefault || '—'}
+              </span>
+            </div>
             <p className="nt-hint" style={{ marginBottom: '0.75rem' }}>
               Mirrors robot diagnostics for autonomous scheduling, PathPlanner outputs, and tracking
-              error. Full raw keys also appear under <strong>Network Tables</strong> (filter{' '}
-              <code>Auto</code> or <code>PathFollower</code>).
+              error. If <code>outputInvokeCount</code> stays at 0 during auto, the PathPlanner output
+              callback never ran (command not following a path). If <code>defaultDriveScheduled</code> is
+              true while a path should run, teleop default drive may still be claiming the drivetrain.
+              Full keys: <strong>Network Tables</strong> (filter <code>Auto</code> or{' '}
+              <code>PathFollower</code>).
             </p>
             <div className="nt-table-wrap">
               <table className="nt-table">
                 <tbody>
+                  <Row
+                    label="SmartDashboard / Auto Mode/options"
+                    value={state.availableAutos.length > 0 ? state.availableAutos.join(', ') : '—'}
+                  />
+                  <Row
+                    label="SmartDashboard / Auto Mode/selected"
+                    value={state.chooserSelected || '—'}
+                  />
+                  <Row label="SmartDashboard / Auto Mode/active" value={state.chooserActive || '—'} />
+                  <Row
+                    label="SmartDashboard / Auto Mode/default"
+                    value={state.chooserDefault || '—'}
+                  />
                   <Row label="Auto / lastEvent" value={state.lastEvent || '—'} />
                   <Row label="Auto / eventIndex" value={String(state.eventIndex)} />
-                  <Row label="Auto / selectedCommandName" value={state.selectedCommandName || '—'} />
-                  <Row label="Auto / selectedCommandClass" value={state.selectedCommandClass || '—'} />
+                  <Row label="Auto / chooserCommandName" value={state.chooserCommandName || '—'} />
+                  <Row label="Auto / chooserCommandClass" value={state.chooserCommandClass || '—'} />
+                  <Row label="Auto / resolvedAutoCommandName" value={state.resolvedAutoCommandName || '—'} />
+                  <Row label="Auto / resolvedAutoCommandClass" value={state.resolvedAutoCommandClass || '—'} />
+                  <Row
+                    label="Auto / autoUsedChooserFallback"
+                    value={String(state.autoUsedChooserFallback)}
+                  />
+                  <Row
+                    label="Auto / defaultDriveCanceledForAuto"
+                    value={String(state.defaultDriveCanceledForAuto)}
+                  />
+                  <Row label="Auto / selectedCommandName (alias)" value={state.selectedCommandName || '—'} />
+                  <Row label="Auto / selectedCommandClass (alias)" value={state.selectedCommandClass || '—'} />
                   <Row label="Auto / driveSubsystemCommand" value={state.driveSubsystemCommand || '—'} />
                   <Row
                     label="Auto / registeredNamedCommands"
                     value={state.registeredNamedCommands || '—'}
+                  />
+                  <Row
+                    label="Auto / autonomousCommandScheduled"
+                    value={String(state.autonomousCommandScheduled)}
+                  />
+                  <Row
+                    label="Auto / defaultDriveScheduled"
+                    value={String(state.defaultDriveScheduled)}
+                  />
+                  <Row
+                    label="PathFollower / outputInvokeCount"
+                    value={String(state.outputInvokeCount)}
                   />
                   <Row
                     label="PathFollower / pathOutputRecent"

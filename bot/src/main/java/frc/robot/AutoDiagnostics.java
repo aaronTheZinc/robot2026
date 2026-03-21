@@ -12,7 +12,10 @@ import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.StringPublisher;
 import edu.wpi.first.networktables.StructPublisher;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import edu.wpi.first.wpilibj2.command.Subsystem;
 
 /**
  * NetworkTables + SignalLogger diagnostics for autonomous and PathPlanner path following.
@@ -25,14 +28,34 @@ public final class AutoDiagnostics {
 
     private static final StringPublisher kRegisteredNamed =
             kAuto.getStringTopic("registeredNamedCommands").publish();
+    /** Raw {@link SendableChooser#getSelected()} at auto init (may be null). */
+    private static final StringPublisher kChooserCommandName =
+            kAuto.getStringTopic("chooserCommandName").publish();
+    private static final StringPublisher kChooserCommandClass =
+            kAuto.getStringTopic("chooserCommandClass").publish();
+    /** Command actually scheduled for autonomous (after null-safe fallback). */
+    private static final StringPublisher kResolvedName =
+            kAuto.getStringTopic("resolvedAutoCommandName").publish();
+    private static final StringPublisher kResolvedClass =
+            kAuto.getStringTopic("resolvedAutoCommandClass").publish();
+    private static final BooleanPublisher kAutoUsedFallback =
+            kAuto.getBooleanTopic("autoUsedChooserFallback").publish();
+    /** Backward-compatible aliases for dashboards; same as resolved command. */
     private static final StringPublisher kSelectedName =
             kAuto.getStringTopic("selectedCommandName").publish();
     private static final StringPublisher kSelectedClass =
             kAuto.getStringTopic("selectedCommandClass").publish();
+    /** Set from {@link Robot#autonomousInit} when default drive is canceled for auto. */
+    private static final BooleanPublisher kDefaultDriveCanceledForAuto =
+            kAuto.getBooleanTopic("defaultDriveCanceledForAuto").publish();
     private static final StringPublisher kDriveReqCmd =
             kAuto.getStringTopic("driveSubsystemCommand").publish();
     private static final StringPublisher kLastEvent = kAuto.getStringTopic("lastEvent").publish();
     private static final IntegerPublisher kEventIndex = kAuto.getIntegerTopic("eventIndex").publish();
+    private static final BooleanPublisher kAutoCommandScheduled =
+            kAuto.getBooleanTopic("autonomousCommandScheduled").publish();
+    private static final BooleanPublisher kDefaultDriveScheduled =
+            kAuto.getBooleanTopic("defaultDriveScheduled").publish();
 
     private static final BooleanPublisher kAlliancePresent =
             kPath.getBooleanTopic("alliancePresent").publish();
@@ -50,6 +73,9 @@ public final class AutoDiagnostics {
     private static final DoublePublisher kCmdVy = kPath.getDoubleTopic("commandedVy").publish();
     private static final DoublePublisher kCmdOmega = kPath.getDoubleTopic("commandedOmega").publish();
     private static final DoublePublisher kFfMag = kPath.getDoubleTopic("feedforwardForceSumN").publish();
+    /** Increments every time PathPlanner's AutoBuilder output consumer runs (detect "follower never runs"). */
+    private static final IntegerPublisher kOutputInvokes =
+            kPath.getIntegerTopic("outputInvokeCount").publish();
     private static final BooleanPublisher kPathOutputRecent =
             kPath.getBooleanTopic("pathOutputRecent").publish();
 
@@ -57,7 +83,10 @@ public final class AutoDiagnostics {
     private static final DoublePublisher kErrVy = kPath.getDoubleTopic("vyError").publish();
     private static final DoublePublisher kErrOmega = kPath.getDoubleTopic("omegaError").publish();
 
-    private static final long kPathOutputStaleNs = 150_000_000L; // 150 ms
+    /** Allow telemetry that runs on a different thread than the scheduler to still see "recent" output. */
+    private static final long kPathOutputStaleNs = 400_000_000L; // 400 ms
+
+    private static int s_outputInvokes;
 
     private static volatile ChassisSpeeds s_lastPathCommanded = new ChassisSpeeds();
     private static volatile long s_lastPathOutputNs;
@@ -70,14 +99,46 @@ public final class AutoDiagnostics {
         kRegisteredNamed.set(csv);
     }
 
-    public static void publishSelectedAuto(Command cmd) {
+    public static void publishChooserAutoSelection(Command cmd) {
         if (cmd == null) {
+            kChooserCommandName.set("(null)");
+            kChooserCommandClass.set("(null)");
+        } else {
+            kChooserCommandName.set(cmd.getName());
+            kChooserCommandClass.set(cmd.getClass().getName());
+        }
+    }
+
+    /**
+     * Publishes the command that will be scheduled in autonomous (chooser selection or fallback).
+     * Also updates {@code selectedCommandName} / {@code selectedCommandClass} for older dashboards.
+     */
+    public static void publishResolvedAutonomous(Command resolved, boolean usedChooserFallback) {
+        kAutoUsedFallback.set(usedChooserFallback);
+        if (resolved == null) {
+            kResolvedName.set("(null)");
+            kResolvedClass.set("(null)");
             kSelectedName.set("(null)");
             kSelectedClass.set("(null)");
-        } else {
-            kSelectedName.set(cmd.getName());
-            kSelectedClass.set(cmd.getClass().getName());
+            return;
         }
+        String name = resolved.getName();
+        String cls = resolved.getClass().getName();
+        kResolvedName.set(name);
+        kResolvedClass.set(cls);
+        kSelectedName.set(name);
+        kSelectedClass.set(cls);
+    }
+
+    /** @deprecated Use {@link #publishChooserAutoSelection} and {@link #publishResolvedAutonomous}. */
+    @Deprecated
+    public static void publishSelectedAuto(Command cmd) {
+        publishChooserAutoSelection(cmd);
+        publishResolvedAutonomous(cmd, false);
+    }
+
+    public static void publishDefaultDriveCanceledForAuto(boolean canceled) {
+        kDefaultDriveCanceledForAuto.set(canceled);
     }
 
     public static void publishActiveDriveCommand(Command requiringDrive) {
@@ -86,6 +147,20 @@ public final class AutoDiagnostics {
         } else {
             kDriveReqCmd.set(requiringDrive.getName() + " [" + requiringDrive.getClass().getSimpleName() + "]");
         }
+    }
+
+    /**
+     * After {@link CommandScheduler#run()}: whether the main auto command is still scheduled and whether
+     * the drivetrain default (teleop) command got scheduled — both true usually means joystick drive is
+     * winning over PathPlanner for the drivetrain.
+     */
+    public static void publishAutonomousSchedulerSnap(
+            Command autonomousCommand, CommandScheduler scheduler, Subsystem drivetrain) {
+        boolean autoOn = autonomousCommand != null && scheduler.isScheduled(autonomousCommand);
+        Command def = scheduler.getDefaultCommand(drivetrain);
+        boolean defOn = def != null && scheduler.isScheduled(def);
+        kAutoCommandScheduled.set(autoOn);
+        kDefaultDriveScheduled.set(defOn);
     }
 
     public static void logEvent(String message) {
@@ -124,6 +199,10 @@ public final class AutoDiagnostics {
     }
 
     public static void recordPathPlannerOutput(ChassisSpeeds discretized, double feedforwardForceSumN) {
+        s_outputInvokes++;
+        kOutputInvokes.set(s_outputInvokes);
+        SignalLogger.writeDouble("PathFollower/outputInvokeCount", s_outputInvokes, "");
+
         s_lastPathCommanded = discretized;
         s_lastPathOutputNs = System.nanoTime();
         kCmdSpeeds.set(discretized);

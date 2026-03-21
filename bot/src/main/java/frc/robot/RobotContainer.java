@@ -11,12 +11,14 @@ import com.ctre.phoenix6.swerve.SwerveRequest;
 
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.auto.NamedCommands;
+import com.pathplanner.lib.commands.FollowPathCommand;
 
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
@@ -33,21 +35,18 @@ import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.VisionMeasurement;
 
 public class RobotContainer {
-    private static final String kDefaultPathPlannerAutoName = "New Auto";
     private static final double kAutoIntakeSequenceSeconds = 1.5;
     private static final String kDriveAssistTargetXKey = "Drive Assist/Target X (m)";
     private static final String kDriveAssistTargetYKey = "Drive Assist/Target Y (m)";
     private static final String kDriveAssistTargetHeadingKey = "Drive Assist/Target Heading (deg)";
-    private static final double kTeleopDriveOutputScale = 0.8;
-    /** Robot-relative reverse translation speed (m/s); fraction of scaled teleop max. */
+    /** Robot-relative reverse translation speed (m/s) for named auto / driver assist. */
     private static final double kBackTranslationMps =
-            kTeleopDriveOutputScale * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond) * 0.45;
+            0.45 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond);
     private static final double kNamedBackTranslationSeconds = 2.0;
-    private static final double kChassisTranslationRampRateMpsPerSec = 2;
-    private static final double kChassisRotationRampRateRadPerSec2 = 9.0;
     private static final double kShotRampSeconds = 1.0;
     private static final double kAutoShotFeedSeconds = 2;
-    private double MaxSpeed = kTeleopDriveOutputScale * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // scaled top speed to reduce peak current draw
+    /** Same as Phoenix SwerveWithPathPlanner example: full kSpeedAt12Volts top speed. */
+    private double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond);
     private double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond); // 3/4 of a rotation per second max angular velocity
 
     /* Setting up bindings for necessary control of the swerve drive platform */
@@ -56,6 +55,8 @@ public class RobotContainer {
             .withDriveRequestType(DriveRequestType.OpenLoopVoltage); // Use open-loop control for drive motors
     private final SwerveRequest.SwerveDriveBrake brake = new SwerveRequest.SwerveDriveBrake();
     private final SwerveRequest.PointWheelsAt point = new SwerveRequest.PointWheelsAt();
+    private final SwerveRequest.RobotCentric forwardStraight = new SwerveRequest.RobotCentric()
+            .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
     private final Telemetry logger = new Telemetry(MaxSpeed);
     private final KnnInterpreter knnInterpreter = new KnnInterpreter();
@@ -79,6 +80,7 @@ public class RobotContainer {
     public RobotContainer() {
         NamedCommands.registerCommand("Center Shoot", getCenterAutoShotSequenceCommand());
         NamedCommands.registerCommand("Base Shoot", getCenterAutoShotSequenceCommand());
+        NamedCommands.registerCommand("Wing Shot", getAutoShotSequenceCommand(true));
         NamedCommands.registerCommand(
             "Intake Sequence",
             Commands.deadline(
@@ -93,7 +95,7 @@ public class RobotContainer {
         AutoDiagnostics.publishRegisteredNamedCommands(
                 "Center Shoot, Base Shoot, Intake Sequence, Back Translation");
 
-        autoChooser = AutoBuilder.buildAutoChooser(kDefaultPathPlannerAutoName);
+        autoChooser = AutoBuilder.buildAutoChooser("Tests");
         autoChooser.addOption("Basic Shoot Auto", getBasicShootAutoCommand());
         SmartDashboard.putData("Auto Mode", autoChooser);
 
@@ -108,6 +110,9 @@ public class RobotContainer {
         SmartDashboard.putNumber(kDriveAssistTargetHeadingKey, 0.0);
 
         configureBindings();
+
+        // Warmup PathPlanner to avoid Java pauses (matches SwerveWithPathPlanner example).
+        CommandScheduler.getInstance().schedule(FollowPathCommand.warmupCommand());
     }
 
     private Command getBasicShootAutoCommand() {
@@ -190,11 +195,6 @@ public class RobotContainer {
         );
     }
 
-    private Command getPointWheelsAtAngleCommand(double angleDegrees) {
-        Rotation2d direction = Rotation2d.fromDegrees(angleDegrees);
-        return drivetrain.applyRequest(() -> point.withModuleDirection(direction));
-    }
-
     public void flipDriveDirection() {
             Pose2d currentPose = drivetrain.getState().Pose;
             drivetrain.resetPose(new Pose2d(
@@ -204,42 +204,38 @@ public class RobotContainer {
     }
 
     private void configureBindings() {
-        // Note that X is defined as forward according to WPILib convention,
-        // and Y is defined as to the left according to WPILib convention.
-        Command driveCommand = drivetrain.applyRequest(() -> {
-            double limitedX = (joystick.getLeftY() * MaxSpeed);
-            double limitedY = joystick.getLeftX() * MaxSpeed;
-            double limitedOmega = -joystick.getRightX() * MaxAngularRate;
-
-            return drive.withVelocityX(limitedX) // Drive forward with negative Y (forward)
-                .withVelocityY(limitedY) // Drive left with negative X (left)
-                .withRotationalRate(limitedOmega); // Drive counterclockwise with negative X (left)
-        });
-        // Chassis default runs on drivetrain only; no vision requirement so teleop is uninterrupted.
-        drivetrain.setDefaultCommand(driveCommand);
-    
+        // Chassis: match Phoenix SwerveWithPathPlanner (field-centric stick signs + bindings).
+        // Note that X is forward and Y is left per WPILib convention.
+        drivetrain.setDefaultCommand(
+                drivetrain.applyRequest(
+                        () ->
+                                drive.withVelocityX(-joystick.getLeftY() * MaxSpeed) // forward
+                                        .withVelocityY(-joystick.getLeftX() * MaxSpeed) // left
+                                        .withRotationalRate(-joystick.getRightX() * MaxAngularRate)));
 
         // Idle while the robot is disabled. This ensures the configured
         // neutral mode is applied to the drive motors while disabled.
         final var idle = new SwerveRequest.Idle();
         RobotModeTriggers.disabled().whileTrue(
-            drivetrain.applyRequest(() -> idle).ignoringDisable(true)
-        );
+                drivetrain.applyRequest(() -> idle).ignoringDisable(true));
 
         joystick.a().whileTrue(drivetrain.applyRequest(() -> brake));
-        joystick.b().whileTrue(drivetrain.applyRequest(() ->
-            point.withModuleDirection(new Rotation2d(-joystick.getLeftY(), joystick.getLeftX()))
-        ));
+        joystick.b()
+                .whileTrue(
+                        drivetrain.applyRequest(
+                                () ->
+                                        point.withModuleDirection(
+                                                new Rotation2d(
+                                                        -joystick.getLeftY(), -joystick.getLeftX()))));
 
-        // Driver D-pad wheel-angle test: each direction points all modules at that heading.
-        joystick.povUp().whileTrue(getPointWheelsAtAngleCommand(0.0));
-        joystick.povUpRight().whileTrue(getPointWheelsAtAngleCommand(-45.0));
-        joystick.povRight().whileTrue(getPointWheelsAtAngleCommand(-90.0));
-        joystick.povDownRight().whileTrue(getPointWheelsAtAngleCommand(-135.0));
-        joystick.povDown().whileTrue(getPointWheelsAtAngleCommand(180.0));
-        joystick.povDownLeft().whileTrue(getPointWheelsAtAngleCommand(135.0));
-        joystick.povLeft().whileTrue(getPointWheelsAtAngleCommand(90.0));
-        joystick.povUpLeft().whileTrue(getPointWheelsAtAngleCommand(45.0));
+        joystick.povUp()
+                .whileTrue(
+                        drivetrain.applyRequest(
+                                () -> forwardStraight.withVelocityX(0.5).withVelocityY(0)));
+        joystick.povDown()
+                .whileTrue(
+                        drivetrain.applyRequest(
+                                () -> forwardStraight.withVelocityX(-0.5).withVelocityY(0)));
 
         // Run SysId routines when holding back/start and X/Y.
         // Note that each routine should be run exactly once in a single log.
@@ -248,18 +244,8 @@ public class RobotContainer {
         joystick.start().and(joystick.y()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kForward));
         joystick.start().and(joystick.x()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kReverse));
 
-        // Reset field-centric heading to 0 degrees on Start + left bumper.
-        // Using a combo prevents accidental heading resets during driving.
-        joystick.start().and(joystick.leftBumper()).onTrue(drivetrain.runOnce(() -> {
-            Pose2d currentPose = drivetrain.getState().Pose;
-            drivetrain.resetPose(new Pose2d(
-                currentPose.getTranslation(),
-                Rotation2d.kZero
-            ));
-        }));
-        // Driver R1: hold for robot-relative reverse translation (no turn).
-        joystick.rightBumper().whileTrue(driveCommands.getBackTranslationCommand());
-        // joystick.rightBumper().whileTrue(getDriveAssistCommand());
+        // Reset field-centric heading (matches example: left bumper only).
+        joystick.leftBumper().onTrue(drivetrain.runOnce(drivetrain::seedFieldCentric));
 
         // Subsystems controller (1): triggers, bumpers, buttons, D-pad
         // R2: reverse shooter while held
@@ -290,9 +276,11 @@ public class RobotContainer {
         });
     }
 
+    /** Same as SwerveWithPathPlanner: chooser selection only. */
     public Command getAutonomousCommand() {
         Command selected = autoChooser.getSelected();
-        AutoDiagnostics.publishSelectedAuto(selected);
+        AutoDiagnostics.publishChooserAutoSelection(selected);
+        AutoDiagnostics.publishResolvedAutonomous(selected, false);
         return selected;
     }
 
