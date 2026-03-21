@@ -271,6 +271,150 @@ const DEFAULT_TOPICS: TopicConfig[] = [
         ? { knnSelectedIndex: Math.floor(value) }
         : null,
   },
+  {
+    path: '/Auto/lastEvent',
+    type: NetworkTablesTypeInfos.kString,
+    defaultValue: '',
+    map: (value) =>
+      typeof value === 'string' ? { autoDebug: { lastEvent: value } } : null,
+  },
+  {
+    path: '/Auto/eventIndex',
+    type: NetworkTablesTypeInfos.kInteger,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { autoDebug: { eventIndex: Math.floor(value) } } : null,
+  },
+  {
+    path: '/Auto/selectedCommandName',
+    type: NetworkTablesTypeInfos.kString,
+    defaultValue: '',
+    map: (value) =>
+      typeof value === 'string' ? { autoDebug: { selectedCommandName: value } } : null,
+  },
+  {
+    path: '/Auto/selectedCommandClass',
+    type: NetworkTablesTypeInfos.kString,
+    defaultValue: '',
+    map: (value) =>
+      typeof value === 'string' ? { autoDebug: { selectedCommandClass: value } } : null,
+  },
+  {
+    path: '/Auto/driveSubsystemCommand',
+    type: NetworkTablesTypeInfos.kString,
+    defaultValue: '',
+    map: (value) =>
+      typeof value === 'string' ? { autoDebug: { driveSubsystemCommand: value } } : null,
+  },
+  {
+    path: '/Auto/registeredNamedCommands',
+    type: NetworkTablesTypeInfos.kString,
+    defaultValue: '',
+    map: (value) =>
+      typeof value === 'string' ? { autoDebug: { registeredNamedCommands: value } } : null,
+  },
+  {
+    path: '/PathFollower/pathOutputRecent',
+    type: NetworkTablesTypeInfos.kBoolean,
+    defaultValue: false,
+    map: (value) =>
+      typeof value === 'boolean' ? { autoDebug: { pathOutputRecent: value } } : null,
+  },
+  {
+    path: '/PathFollower/alliancePresent',
+    type: NetworkTablesTypeInfos.kBoolean,
+    defaultValue: false,
+    map: (value) =>
+      typeof value === 'boolean' ? { autoDebug: { alliancePresent: value } } : null,
+  },
+  {
+    path: '/PathFollower/flipPathForRed',
+    type: NetworkTablesTypeInfos.kBoolean,
+    defaultValue: false,
+    map: (value) =>
+      typeof value === 'boolean' ? { autoDebug: { flipPathForRed: value } } : null,
+  },
+  {
+    path: '/PathFollower/commandedVx',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { autoDebug: { commandedVx: value } } : null,
+  },
+  {
+    path: '/PathFollower/commandedVy',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { autoDebug: { commandedVy: value } } : null,
+  },
+  {
+    path: '/PathFollower/commandedOmega',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { autoDebug: { commandedOmega: value } } : null,
+  },
+  {
+    path: '/PathFollower/feedforwardForceSumN',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { autoDebug: { feedforwardForceSumN: value } } : null,
+  },
+  {
+    path: '/PathFollower/vxError',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) => (typeof value === 'number' ? { autoDebug: { vxError: value } } : null),
+  },
+  {
+    path: '/PathFollower/vyError',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) => (typeof value === 'number' ? { autoDebug: { vyError: value } } : null),
+  },
+  {
+    path: '/PathFollower/omegaError',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) => (typeof value === 'number' ? { autoDebug: { omegaError: value } } : null),
+  },
+  {
+    path: '/PathFollower/configMassKg',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { autoDebug: { configMassKg: value } } : null,
+  },
+  {
+    path: '/PathFollower/configMoiKgM2',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { autoDebug: { configMoiKgM2: value } } : null,
+  },
+  {
+    path: '/PathFollower/configWheelCOF',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { autoDebug: { configWheelCOF: value } } : null,
+  },
+  {
+    path: '/PathFollower/configTransKp',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { autoDebug: { configTransKp: value } } : null,
+  },
+  {
+    path: '/PathFollower/configRotKp',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { autoDebug: { configRotKp: value } } : null,
+  },
 ];
 
 export function connectRobotStateSubscription(

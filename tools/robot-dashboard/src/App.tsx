@@ -6,6 +6,7 @@ import ChassisView from './components/ChassisView';
 import KnnGridView from './components/KnnGridView';
 import MotorTestPanel from './components/MotorTestPanel';
 import MotorTestView from './components/MotorTestView';
+import AutoDebugPanel from './components/AutoDebugPanel';
 import NetworkTableView from './components/NetworkTableView';
 import SimulationView from './components/SimulationView';
 import TurretView from './components/TurretView';
@@ -36,6 +37,7 @@ export type ViewTab =
   | 'chassis'
   | 'motortest'
   | 'networktables'
+  | 'autodebug'
   | 'knngrid'
   | 'simulation';
 
@@ -49,6 +51,7 @@ const DEBUG_TABS: ViewTab[] = [
   'motortest',
   'simulation',
   'networktables',
+  'autodebug',
   'knngrid',
 ];
 const COMPETITION_TABS: ViewTab[] = ['dashboard', 'turret', 'simulation', 'motortest'];
@@ -588,6 +591,8 @@ function App() {
                 ? 'KNN Grid'
                 : tab === 'networktables'
                   ? 'Network Tables'
+                  : tab === 'autodebug'
+                    ? 'Auto debug'
                   : tab === 'motortest'
                     ? 'Motor Test'
                     : tab === 'simulation'
@@ -626,6 +631,15 @@ function App() {
           connected={state.connected}
           nt4Enabled={nt4Enabled}
           mode={mode}
+        />
+      )}
+
+      {viewTab === 'autodebug' && (
+        <AutoDebugPanel
+          connected={state.connected}
+          nt4Enabled={nt4Enabled}
+          mode={mode}
+          state={state.autoDebug}
         />
       )}
 

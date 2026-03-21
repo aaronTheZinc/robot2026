@@ -5,14 +5,18 @@
 package frc.robot;
 
 import com.ctre.phoenix6.HootAutoReplay;
+import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.Utils;
 
 import edu.wpi.first.cameraserver.CameraServer;
 import edu.wpi.first.cscore.UsbCamera;
 import edu.wpi.first.net.PortForwarder;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
+
+import java.util.Optional;
 
 public class Robot extends TimedRobot {
     /** True when Driver Station is in Test mode; used to gate test bindings and motor test periodic. */
@@ -57,12 +61,40 @@ public class Robot extends TimedRobot {
 
         // m_robotContainer.flipDriveDirection();
 
+        registerCommandSchedulerDiagnostics();
+    }
+
+    private void registerCommandSchedulerDiagnostics() {
+        CommandScheduler sch = CommandScheduler.getInstance();
+        sch.onCommandInitialize(
+                cmd -> {
+                    if (DriverStation.isAutonomous()) {
+                        AutoDiagnostics.logEvent("cmd init: " + cmd.getName());
+                    }
+                });
+        sch.onCommandFinish(
+                cmd -> {
+                    if (DriverStation.isAutonomous()) {
+                        AutoDiagnostics.logEvent("cmd finish: " + cmd.getName());
+                    }
+                });
+        sch.onCommandInterrupt(
+                (Command cmd, Optional<Command> interruptor) -> {
+                    if (DriverStation.isAutonomous()) {
+                        String by = interruptor.map(Command::getName).orElse("(cancel/scheduler)");
+                        AutoDiagnostics.logEvent("cmd interrupt: " + cmd.getName() + " <= " + by);
+                    }
+                });
     }
 
     @Override
     public void robotPeriodic() {
         m_timeAndJoystickReplay.update();
         CommandScheduler.getInstance().run();
+        if (DriverStation.isAutonomous()) {
+            Command requiring = CommandScheduler.getInstance().requiring(m_robotContainer.drivetrain);
+            AutoDiagnostics.publishActiveDriveCommand(requiring);
+        }
         // VisionMeasurement subsystem runs in its periodic() and fuses Limelight with drivetrain odometry.
     }
 
@@ -81,18 +113,27 @@ public class Robot extends TimedRobot {
     @Override
     public void autonomousInit() {
         m_autonomousCommand = m_robotContainer.getAutonomousCommand();
- 
+
+        if (m_autonomousCommand == null) {
+            DriverStation.reportWarning(
+                    "Auto: SendableChooser returned null — no autonomous command was scheduled.",
+                    false);
+            AutoDiagnostics.logEvent("autonomousInit: selected command is NULL");
+        } else {
+            AutoDiagnostics.logEvent("autonomousInit: schedule " + m_autonomousCommand.getName());
+            SignalLogger.writeString("Auto/scheduledCommand", m_autonomousCommand.getName());
+        }
 
         if (Utils.isSimulation()) {
             m_robotContainer.getShooter().setShooterReady(true);
             m_robotContainer.getIntake().setPivotReady(true);
         } else {
             CommandScheduler.getInstance().schedule(m_robotContainer.getHoodHomingCommand());
-                  if (m_autonomousCommand != null) {
-            CommandScheduler.getInstance().schedule(m_autonomousCommand);
+            // CommandScheduler.getInstance().schedule(m_robotContainer.getPivotHomingCommand());
         }
 
-            // CommandScheduler.getInstance().schedule(m_robotContainer.getPivotHomingCommand());
+        if (m_autonomousCommand != null) {
+            CommandScheduler.getInstance().schedule(m_autonomousCommand);
         }
     }
 

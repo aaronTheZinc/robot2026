@@ -13,15 +13,20 @@ import com.ctre.phoenix6.swerve.SwerveModuleConstants;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 
 import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.config.ModuleConfig;
 import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.config.RobotConfig;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
+import com.pathplanner.lib.path.PathPlannerPath;
 import com.pathplanner.lib.path.PathConstraints;
+import com.pathplanner.lib.util.DriveFeedforwards;
 
 import edu.wpi.first.math.Matrix;
+import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.wpilibj.DriverStation;
@@ -33,6 +38,8 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 
+import frc.robot.AutoDiagnostics;
+import frc.robot.generated.TunerConstants;
 import frc.robot.generated.TunerConstants.TunerSwerveDrivetrain;
 
 /**
@@ -43,6 +50,11 @@ import frc.robot.generated.TunerConstants.TunerSwerveDrivetrain;
  * https://v6.docs.ctr-electronics.com/en/stable/docs/tuner/tuner-swerve/index.html
  */
 public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Subsystem {
+    private static final double kPathPlannerRobotMassKg = 52.0;
+    private static final double kPathPlannerRobotMoiKgM2 = 6.0;
+    private static final double kPathPlannerWheelCOF = 1.2;
+    private static final PIDConstants kPathTransPid = new PIDConstants(10, 0, 0);
+    private static final PIDConstants kPathRotPid = new PIDConstants(7, 0, 0);
     private static final double kSimLoopPeriod = 0.004; // 4 ms
     private Notifier m_simNotifier = null;
     private double m_lastSimTime;
@@ -210,32 +222,72 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     }
 
     private void configureAutoBuilder() {
-        try {
-            var config = RobotConfig.fromGUISettings();
-            AutoBuilder.configure(
-                () -> getState().Pose,   // Supplier of current robot pose
-                this::resetPose,         // Consumer for seeding pose against auto
-                () -> getState().Speeds, // Supplier of current robot speeds
-                // Consumer of ChassisSpeeds and feedforwards to drive the robot
-                (speeds, feedforwards) -> setControl(
-                    m_pathApplyRobotSpeeds.withSpeeds(ChassisSpeeds.discretize(speeds, 0.020))
+        var config = createPathPlannerConfigFromTunerConstants();
+        AutoDiagnostics.publishPathPlannerRobotConfig(
+                kPathPlannerRobotMassKg,
+                kPathPlannerRobotMoiKgM2,
+                kPathPlannerWheelCOF,
+                kPathTransPid.kP,
+                kPathRotPid.kP);
+        AutoBuilder.configure(
+            () -> getState().Pose,   // Supplier of current robot pose
+            this::resetPose,         // Consumer for seeding pose against auto
+            () -> getState().Speeds, // Supplier of current robot speeds
+            // Consumer of ChassisSpeeds and feedforwards to drive the robot
+            (speeds, feedforwards) -> {
+                ChassisSpeeds discretized = ChassisSpeeds.discretize(speeds, 0.020);
+                AutoDiagnostics.recordPathPlannerOutput(discretized, feedforwardForceSum(feedforwards));
+                setControl(
+                    m_pathApplyRobotSpeeds
+                        .withSpeeds(discretized)
                         .withWheelForceFeedforwardsX(feedforwards.robotRelativeForcesXNewtons())
-                        .withWheelForceFeedforwardsY(feedforwards.robotRelativeForcesYNewtons())
-                ),
-                new PPHolonomicDriveController(
-                    // PID constants for translation
-                    new PIDConstants(10, 0, 0),
-                    // PID constants for rotation
-                    new PIDConstants(7, 0, 0)
-                ),
-                config,
-                // Assume the path needs to be flipped for Red vs Blue, this is normally the case
-                () -> DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red,
-                this // Subsystem for requirements
-            );
-        } catch (Exception ex) {
-            DriverStation.reportError("Failed to load PathPlanner config and configure AutoBuilder", ex.getStackTrace());
+                        .withWheelForceFeedforwardsY(feedforwards.robotRelativeForcesYNewtons()));
+            },
+            new PPHolonomicDriveController(kPathTransPid, kPathRotPid),
+            config,
+            // Assume the path needs to be flipped for Red vs Blue, this is normally the case
+            () -> DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red,
+            this // Subsystem for requirements
+        );
+    }
+
+    private static double feedforwardForceSum(DriveFeedforwards ff) {
+        double s = 0;
+        for (double v : ff.robotRelativeForcesXNewtons()) {
+            s += Math.abs(v);
         }
+        for (double v : ff.robotRelativeForcesYNewtons()) {
+            s += Math.abs(v);
+        }
+        return s;
+    }
+
+    @Override
+    public void resetPose(Pose2d pose) {
+        AutoDiagnostics.logPoseReset(pose);
+        super.resetPose(pose);
+    }
+
+    private RobotConfig createPathPlannerConfigFromTunerConstants() {
+        ModuleConfig moduleConfig = new ModuleConfig(
+            Meters.of(TunerConstants.FrontLeft.WheelRadius),
+            TunerConstants.kSpeedAt12Volts,
+            kPathPlannerWheelCOF,
+            DCMotor.getKrakenX60(1),
+            TunerConstants.FrontLeft.DriveMotorGearRatio,
+            Amps.of(TunerConstants.FrontLeft.SlipCurrent),
+            1
+        );
+
+        return new RobotConfig(
+            kPathPlannerRobotMassKg,
+            kPathPlannerRobotMoiKgM2,
+            moduleConfig,
+            new Translation2d(TunerConstants.FrontLeft.LocationX, TunerConstants.FrontLeft.LocationY),
+            new Translation2d(TunerConstants.FrontRight.LocationX, TunerConstants.FrontRight.LocationY),
+            new Translation2d(TunerConstants.BackLeft.LocationX, TunerConstants.BackLeft.LocationY),
+            new Translation2d(TunerConstants.BackRight.LocationX, TunerConstants.BackRight.LocationY)
+        );
     }
 
     /**
@@ -266,6 +318,33 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
      */
     public Command pathfindToPose(Supplier<Pose2d> targetPoseSupplier) {
         return Commands.defer(() -> pathfindToPose(targetPoseSupplier.get()), Set.of(this));
+    }
+
+    /**
+     * Runs a PathPlanner path by its file name from deploy/pathplanner/paths.
+     * <p>
+     * Example: path name "center-back" loads "center-back.path".
+     *
+     * @param pathName path file name without the .path extension
+     * @return command that follows the named path, or no-op if loading fails
+     */
+    public Command runNamedPath(String pathName) {
+        return Commands.defer(
+            () -> {
+                try {
+                    PathPlannerPath path = PathPlannerPath.fromPathFile(pathName);
+                    return AutoBuilder.followPath(path);
+                } catch (Exception ex) {
+                    AutoDiagnostics.reportPathLoadFailed(pathName, ex.getMessage());
+                    DriverStation.reportError(
+                        "Failed to load PathPlanner path '" + pathName + "': " + ex.getMessage(),
+                        ex.getStackTrace()
+                    );
+                    return Commands.none();
+                }
+            },
+            Set.of(this)
+        );
     }
 
     /**
@@ -309,6 +388,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
                 m_hasAppliedOperatorPerspective = true;
             });
         }
+        boolean flipRed = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red;
+        AutoDiagnostics.updateAllianceAndFlip(flipRed);
     }
 
     private void startSimThread() {

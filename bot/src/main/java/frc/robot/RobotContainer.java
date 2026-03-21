@@ -10,8 +10,8 @@ import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 
 import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.auto.NamedCommands;
 
-import edu.wpi.first.math.filter.SlewRateLimiter;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
@@ -22,6 +22,7 @@ import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 
+import frc.robot.commands.DriveCommands;
 import frc.robot.commands.IntakeCommands;
 import frc.robot.commands.ShooterCommands;
 import frc.robot.generated.TunerConstants;
@@ -32,14 +33,21 @@ import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.VisionMeasurement;
 
 public class RobotContainer {
+    private static final String kDefaultPathPlannerAutoName = "New Auto";
+    private static final double kAutoIntakeSequenceSeconds = 1.5;
     private static final String kDriveAssistTargetXKey = "Drive Assist/Target X (m)";
     private static final String kDriveAssistTargetYKey = "Drive Assist/Target Y (m)";
     private static final String kDriveAssistTargetHeadingKey = "Drive Assist/Target Heading (deg)";
-    private static final double kChassisTranslationRampRateMpsPerSec = 2.5;
-    private static final double kChassisRotationRampRateRadPerSec2 = 5.0;
+    private static final double kTeleopDriveOutputScale = 0.8;
+    /** Robot-relative reverse translation speed (m/s); fraction of scaled teleop max. */
+    private static final double kBackTranslationMps =
+            kTeleopDriveOutputScale * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond) * 0.45;
+    private static final double kNamedBackTranslationSeconds = 2.0;
+    private static final double kChassisTranslationRampRateMpsPerSec = 2;
+    private static final double kChassisRotationRampRateRadPerSec2 = 9.0;
     private static final double kShotRampSeconds = 1.0;
     private static final double kAutoShotFeedSeconds = 2;
-    private double MaxSpeed = 1.0 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // kSpeedAt12Volts desired top speed
+    private double MaxSpeed = kTeleopDriveOutputScale * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond); // scaled top speed to reduce peak current draw
     private double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond); // 3/4 of a rotation per second max angular velocity
 
     /* Setting up bindings for necessary control of the swerve drive platform */
@@ -54,11 +62,10 @@ public class RobotContainer {
 
     private final CommandXboxController joystick = new CommandXboxController(0);
     private final CommandXboxController subsystems = new CommandXboxController(1);
-    private final SlewRateLimiter xSpeedLimiter = new SlewRateLimiter(kChassisTranslationRampRateMpsPerSec);
-    private final SlewRateLimiter ySpeedLimiter = new SlewRateLimiter(kChassisTranslationRampRateMpsPerSec);
-    private final SlewRateLimiter omegaLimiter = new SlewRateLimiter(kChassisRotationRampRateRadPerSec2);
+
 
     public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
+    private final DriveCommands driveCommands = new DriveCommands(drivetrain, kBackTranslationMps);
     /** Fuses Limelight pose estimates with drivetrain odometry when running periodically. */
     public final VisionMeasurement visionMeasurement = new VisionMeasurement(drivetrain);
     private final ShooterSubsystem shooter = new ShooterSubsystem();
@@ -70,8 +77,24 @@ public class RobotContainer {
     private final SendableChooser<Command> autoChooser;
 
     public RobotContainer() {
-        autoChooser = AutoBuilder.buildAutoChooser("Tests");
-        autoChooser.setDefaultOption("Basic Shoot Auto", getBasicShootAutoCommand());
+        NamedCommands.registerCommand("Center Shoot", getCenterAutoShotSequenceCommand());
+        NamedCommands.registerCommand("Base Shoot", getCenterAutoShotSequenceCommand());
+        NamedCommands.registerCommand(
+            "Intake Sequence",
+            Commands.deadline(
+                Commands.waitSeconds(kAutoIntakeSequenceSeconds),
+                intakeCommands.getIntakeCommand()
+            )
+        );
+        NamedCommands.registerCommand(
+            "Back Translation",
+            driveCommands.getBackTranslationForSeconds(kNamedBackTranslationSeconds));
+
+        AutoDiagnostics.publishRegisteredNamedCommands(
+                "Center Shoot, Base Shoot, Intake Sequence, Back Translation");
+
+        autoChooser = AutoBuilder.buildAutoChooser(kDefaultPathPlannerAutoName);
+        autoChooser.addOption("Basic Shoot Auto", getBasicShootAutoCommand());
         SmartDashboard.putData("Auto Mode", autoChooser);
 
         // Debug: adjustable hood and shooter setpoints (run from SmartDashboard / robot dashboard)
@@ -184,9 +207,9 @@ public class RobotContainer {
         // Note that X is defined as forward according to WPILib convention,
         // and Y is defined as to the left according to WPILib convention.
         Command driveCommand = drivetrain.applyRequest(() -> {
-            double limitedX = xSpeedLimiter.calculate(-joystick.getLeftY() * MaxSpeed);
-            double limitedY = ySpeedLimiter.calculate(-joystick.getLeftX() * MaxSpeed);
-            double limitedOmega = omegaLimiter.calculate(-joystick.getRightX() * MaxAngularRate);
+            double limitedX = (joystick.getLeftY() * MaxSpeed);
+            double limitedY = joystick.getLeftX() * MaxSpeed;
+            double limitedOmega = -joystick.getRightX() * MaxAngularRate;
 
             return drive.withVelocityX(limitedX) // Drive forward with negative Y (forward)
                 .withVelocityY(limitedY) // Drive left with negative X (left)
@@ -225,14 +248,17 @@ public class RobotContainer {
         joystick.start().and(joystick.y()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kForward));
         joystick.start().and(joystick.x()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kReverse));
 
-        // Reset field-centric heading with a 180-degree offset on left bumper press.
-        joystick.leftBumper().onTrue(drivetrain.runOnce(() -> {
+        // Reset field-centric heading to 0 degrees on Start + left bumper.
+        // Using a combo prevents accidental heading resets during driving.
+        joystick.start().and(joystick.leftBumper()).onTrue(drivetrain.runOnce(() -> {
             Pose2d currentPose = drivetrain.getState().Pose;
             drivetrain.resetPose(new Pose2d(
                 currentPose.getTranslation(),
-                currentPose.getRotation().plus(Rotation2d.k180deg)
+                Rotation2d.kZero
             ));
         }));
+        // Driver R1: hold for robot-relative reverse translation (no turn).
+        joystick.rightBumper().whileTrue(driveCommands.getBackTranslationCommand());
         // joystick.rightBumper().whileTrue(getDriveAssistCommand());
 
         // Subsystems controller (1): triggers, bumpers, buttons, D-pad
@@ -265,8 +291,9 @@ public class RobotContainer {
     }
 
     public Command getAutonomousCommand() {
-        /* Run the path selected from the auto chooser */
-        return getCenterAutoShotSequenceCommand();
+        Command selected = autoChooser.getSelected();
+        AutoDiagnostics.publishSelectedAuto(selected);
+        return selected;
     }
 
     public ShooterSubsystem getShooter() {

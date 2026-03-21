@@ -7,13 +7,7 @@
         {
           "type": "path",
           "data": {
-            "pathName": "SimplePath"
-          }
-        },
-        {
-          "type": "named",
-          "data": {
-            "name": null
+            "pathName": "center-back"
           }
         }
       ]

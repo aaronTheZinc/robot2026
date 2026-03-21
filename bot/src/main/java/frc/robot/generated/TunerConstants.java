@@ -45,23 +45,44 @@ public class TunerConstants {
     // The type of motor used for the drive motor
     private static final SteerMotorArrangement kSteerMotorType = SteerMotorArrangement.TalonFX_Integrated;
 
-    // The remote sensor feedback type to use for the steer motors;
-    // When not Pro-licensed, Fused*/Sync* automatically fall back to Remote*
-    private static final SteerFeedbackType kSteerFeedbackType = SteerFeedbackType.FusedCANcoder;
+    // Remote CANcoder avoids Phoenix Pro fused-sensor features (fixes "pro feature" errors without Pro).
+    private static final SteerFeedbackType kSteerFeedbackType = SteerFeedbackType.RemoteCANcoder;
 
     // The stator current at which the wheels start to slip;
-    // This needs to be tuned to your individual robot
-    private static final Current kSlipCurrent = Amps.of(120);
+    // This needs to be tuned to your individual robot (balanced profile for ~100 lb robot)
+    private static final Current kSlipCurrent = Amps.of(45);
 
     // Initial configs for the drive and steer motors and the azimuth encoder; these cannot be null.
     // Some configs will be overwritten; check the `with*InitialConfigs()` API documentation.
-    private static final TalonFXConfiguration driveInitialConfigs = new TalonFXConfiguration();
+    private static final TalonFXConfiguration driveInitialConfigs = new TalonFXConfiguration()
+        .withCurrentLimits(
+            new CurrentLimitsConfigs()
+                // Keep drive current constrained to avoid system brownouts under acceleration and pushing.
+                // Balanced profile for ~100 lb robot.
+                .withStatorCurrentLimit(Amps.of(45))
+                .withStatorCurrentLimitEnable(true)
+                .withSupplyCurrentLimit(Amps.of(28))
+                .withSupplyCurrentLimitEnable(true)
+        )
+        .withOpenLoopRamps(
+            new OpenLoopRampsConfigs()
+                // Open-loop voltage is used in teleop, so this smooths current spikes at stick step changes.
+                .withVoltageOpenLoopRampPeriod(0.40)
+                .withDutyCycleOpenLoopRampPeriod(0.40)
+        )
+        .withClosedLoopRamps(
+            new ClosedLoopRampsConfigs()
+                .withVoltageClosedLoopRampPeriod(0.4)
+                .withDutyCycleClosedLoopRampPeriod(0.4)
+                .withTorqueClosedLoopRampPeriod(0.4)
+        );
     private static final TalonFXConfiguration steerInitialConfigs = new TalonFXConfiguration()
         .withCurrentLimits(
             new CurrentLimitsConfigs()
                 // Swerve azimuth does not require much torque output, so we can set a relatively low
                 // stator current limit to help avoid brownouts without impacting performance.
-                .withStatorCurrentLimit(Amps.of(60))
+                // Balanced profile for ~100 lb robot.
+                .withStatorCurrentLimit(Amps.of(20))
                 .withStatorCurrentLimitEnable(true)
         );
     private static final CANcoderConfiguration encoderInitialConfigs = new CANcoderConfiguration();

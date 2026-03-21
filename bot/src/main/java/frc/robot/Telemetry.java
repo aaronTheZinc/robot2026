@@ -117,5 +117,7 @@ public class Telemetry {
             m_moduleDirections[i].setAngle(state.ModuleStates[i].angle);
             m_moduleSpeeds[i].setLength(state.ModuleStates[i].speedMetersPerSecond / (2 * MaxSpeed));
         }
+
+        AutoDiagnostics.publishDriveErrorVsPathFollower(state.Speeds);
     }
 }

@@ -55,6 +55,30 @@ export type RobotState = {
   targets: { x: number; y: number }[];
   /** Robot KNN selected point index from NT /KNN/selectedIndex, or -1 if not set */
   knnSelectedIndex: number;
+  /** PathPlanner / autonomous diagnostics from NT (see AutoDiagnostics.java) */
+  autoDebug: {
+    lastEvent: string;
+    eventIndex: number;
+    selectedCommandName: string;
+    selectedCommandClass: string;
+    driveSubsystemCommand: string;
+    registeredNamedCommands: string;
+    pathOutputRecent: boolean;
+    alliancePresent: boolean;
+    flipPathForRed: boolean;
+    commandedVx: number;
+    commandedVy: number;
+    commandedOmega: number;
+    feedforwardForceSumN: number;
+    vxError: number;
+    vyError: number;
+    omegaError: number;
+    configMassKg: number;
+    configMoiKgM2: number;
+    configWheelCOF: number;
+    configTransKp: number;
+    configRotKp: number;
+  };
 };
 
 export type RobotStateUpdate = {
@@ -70,6 +94,7 @@ export type RobotStateUpdate = {
   visionPose?: Partial<RobotState['visionPose']>;
   targets?: RobotState['targets'];
   knnSelectedIndex?: number;
+  autoDebug?: Partial<RobotState['autoDebug']>;
 };
 
 const DEFAULT_MATCH_TIME: Record<MatchPhase, number> = {
@@ -133,6 +158,29 @@ export function createInitialRobotState(mode: RobotMode): RobotState {
     },
     targets: [],
     knnSelectedIndex: -1,
+    autoDebug: {
+      lastEvent: '',
+      eventIndex: 0,
+      selectedCommandName: '',
+      selectedCommandClass: '',
+      driveSubsystemCommand: '',
+      registeredNamedCommands: '',
+      pathOutputRecent: false,
+      alliancePresent: false,
+      flipPathForRed: false,
+      commandedVx: 0,
+      commandedVy: 0,
+      commandedOmega: 0,
+      feedforwardForceSumN: 0,
+      vxError: 0,
+      vyError: 0,
+      omegaError: 0,
+      configMassKg: 0,
+      configMoiKgM2: 0,
+      configWheelCOF: 0,
+      configTransKp: 0,
+      configRotKp: 0,
+    },
   };
 }
 
@@ -156,6 +204,7 @@ export function applyRobotStateUpdate(
       update.knnSelectedIndex !== undefined
         ? update.knnSelectedIndex
         : prev.knnSelectedIndex,
+    autoDebug: { ...prev.autoDebug, ...update.autoDebug },
     lastUpdateMs: timestampMs,
   };
 }

@@ -24,10 +24,9 @@ import frc.robot.LimelightHelpers;
 import frc.robot.LimelightHelpers.PoseEstimate;
 
 /**
- * Subsystem that reads Limelight pose estimates and fuses them with drivetrain odometry.
- * Runs periodically: sends robot orientation to the Limelight, gets the current pose
- * estimate, computes vision measurement standard deviations from tag count and distance,
- * and adds the measurement to the drivetrain's pose estimator.
+ * Subsystem that reads Limelight pose estimates and can fuse them with drivetrain odometry.
+ * Fusion runs in teleop (when enabled) and when disabled; it does not run during autonomous.
+ * Still publishes Limelight status and NT pose topics every cycle.
  */
 public class VisionMeasurement extends SubsystemBase {
     private static final String DEFAULT_LIMELIGHT_NAME = "limelight";
@@ -140,7 +139,12 @@ public class VisionMeasurement extends SubsystemBase {
 
         SmartDashboard.putBoolean("Limelight/teleopVisionFusionEnabled", m_teleopVisionFusionEnabled);
 
-        // Keep normal teleop on encoder odometry only unless a driver assist explicitly enables fusion.
+        // Autonomous: wheel odometry + auto pose reset only (no Limelight into pose estimator).
+        if (DriverStation.isAutonomous()) {
+            return;
+        }
+
+        // Teleop: encoder odometry unless a driver assist enables fusion.
         if (DriverStation.isTeleop() && !m_teleopVisionFusionEnabled) {
             return;
         }
