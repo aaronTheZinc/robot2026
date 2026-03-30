@@ -8,6 +8,7 @@ import com.ctre.phoenix6.HootAutoReplay;
 import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.Utils;
 
+import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.cameraserver.CameraServer;
 import edu.wpi.first.cscore.UsbCamera;
 import edu.wpi.first.net.PortForwarder;
@@ -89,18 +90,21 @@ public class Robot extends TimedRobot {
 
     @Override
     public void robotPeriodic() {
+        AutoDiagnostics.periodicDebugTelemetrySync();
         m_timeAndJoystickReplay.update();
         CommandScheduler cs = CommandScheduler.getInstance();
         cs.run();
+        m_robotContainer.applyKnnHoodInterpolation();
         if (DriverStation.isAutonomous()) {
             AutoDiagnostics.publishActiveDriveCommand(cs.requiring(m_robotContainer.drivetrain));
             AutoDiagnostics.publishAutonomousSchedulerSnap(m_autonomousCommand, cs, m_robotContainer.drivetrain);
         }
-        // VisionMeasurement subsystem runs in its periodic() and fuses Limelight with drivetrain odometry.
+        m_robotContainer.updateDriverRumble();
     }
 
     @Override
     public void disabledInit() {
+        m_robotContainer.clearDriverRumble();
         m_robotContainer.getShooter().setShooterReady(false);
         m_robotContainer.getIntake().setPivotReady(false);
         AutoDiagnostics.publishDefaultDriveCanceledForAuto(false);
@@ -114,6 +118,7 @@ public class Robot extends TimedRobot {
 
     @Override
     public void autonomousInit() {
+        m_robotContainer.clearDriverRumble();
         Command selectedAuto = m_robotContainer.getAutonomousCommand();
         m_autonomousCommand = selectedAuto;
 
@@ -152,7 +157,10 @@ public class Robot extends TimedRobot {
     public void autonomousPeriodic() {}
 
     @Override
-    public void autonomousExit() {}
+    public void autonomousExit() {
+        // Clear auto path odometry so teleop / next enable starts from a neutral pose estimate.
+        m_robotContainer.drivetrain.resetPose(new Pose2d());
+    }
 
     @Override
     public void teleopInit() {
@@ -173,7 +181,9 @@ public class Robot extends TimedRobot {
     public void teleopPeriodic() {}
 
     @Override
-    public void teleopExit() {}
+    public void teleopExit() {
+        m_robotContainer.clearDriverRumble();
+    }
 
     @Override
     public void testInit() {

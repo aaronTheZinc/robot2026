@@ -34,6 +34,7 @@ import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 
 import frc.robot.AutoDiagnostics;
+import frc.robot.DriveConstants;
 import frc.robot.generated.TunerConstants.TunerSwerveDrivetrain;
 
 /**
@@ -62,6 +63,12 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         2.0,
         Math.toRadians(360.0),
         Math.toRadians(540.0)
+    );
+    private static final PathConstraints kSlowDriverPathfindConstraints = new PathConstraints(
+        DriveConstants.kSlowDriverPathfindMaxVelocityMps,
+        DriveConstants.kSlowDriverPathfindMaxAccelerationMps2,
+        Math.toRadians(DriveConstants.kSlowDriverPathfindMaxAngularVelocityDps),
+        Math.toRadians(DriveConstants.kSlowDriverPathfindMaxAngularAccelerationDps2)
     );
 
     /* Swerve requests to apply during SysId characterization */
@@ -215,22 +222,32 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         try {
             var config = RobotConfig.fromGUISettings();
             AutoBuilder.configure(
-                    () -> getState().Pose, // Supplier of current robot pose
+                    () -> getState().Pose, // Fused pose (wheel + one or two Limelights via VisionMeasurement)
                     this::resetPose, // Consumer for seeding pose against auto
                     () -> getState().Speeds, // Supplier of current robot speeds
-                    (speeds, feedforwards) ->
-                            setControl(
-                                    m_pathApplyRobotSpeeds
-                                            .withSpeeds(ChassisSpeeds.discretize(speeds, 0.020))
-                                            .withWheelForceFeedforwardsX(
-                                                    feedforwards.robotRelativeForcesXNewtons())
-                                            .withWheelForceFeedforwardsY(
-                                                    feedforwards.robotRelativeForcesYNewtons())),
+                    (speeds, feedforwards) -> {
+                        ChassisSpeeds s = ChassisSpeeds.discretize(speeds, 0.020);
+                        s = new ChassisSpeeds(
+                                s.vxMetersPerSecond,
+                                s.vyMetersPerSecond,
+                                DriveConstants.kPathFollowerOmegaMultiplier * s.omegaRadiansPerSecond);
+                        setControl(
+                                m_pathApplyRobotSpeeds
+                                        .withSpeeds(s)
+                                        .withWheelForceFeedforwardsX(
+                                                feedforwards.robotRelativeForcesXNewtons())
+                                        .withWheelForceFeedforwardsY(
+                                                feedforwards.robotRelativeForcesYNewtons()));
+                    },
                     new PPHolonomicDriveController(
-                            // PID constants for translation
-                            new PIDConstants(10, 0, 0),
-                            // PID constants for rotation
-                            new PIDConstants(7, 0, 0)),
+                            new PIDConstants(
+                                    DriveConstants.kHolonomicTranslationP,
+                                    DriveConstants.kHolonomicTranslationI,
+                                    DriveConstants.kHolonomicTranslationD),
+                            new PIDConstants(
+                                    DriveConstants.kHolonomicRotationP,
+                                    DriveConstants.kHolonomicRotationI,
+                                    DriveConstants.kHolonomicRotationD)),
                     config,
                     // Assume the path needs to be flipped for Red vs Blue, this is normally the case
                     () -> DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red,
@@ -260,6 +277,20 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
      */
     public Command pathfindToPose(Pose2d targetPose) {
         return AutoBuilder.pathfindToPose(targetPose, kDriverAssistPathConstraints, 0.0);
+    }
+
+    /**
+     * Pathfinds using {@link DriveConstants} slow limits (driver-assist waypoint).
+     */
+    public Command pathfindToPoseSlow(Pose2d targetPose) {
+        return AutoBuilder.pathfindToPose(targetPose, kSlowDriverPathfindConstraints, 0.0);
+    }
+
+    /**
+     * Pathfinds with slow constraints; pose is resolved when the command starts (matches deferred pathfind).
+     */
+    public Command pathfindToPoseSlow(Supplier<Pose2d> targetPoseSupplier) {
+        return Commands.defer(() -> pathfindToPoseSlow(targetPoseSupplier.get()), Set.of(this));
     }
 
     /**

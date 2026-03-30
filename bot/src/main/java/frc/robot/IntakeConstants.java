@@ -4,7 +4,7 @@
 
 package frc.robot;
 
-/** CAN IDs and constants for the intake (3 Spark MAXs: pivot, roller, hopper). */
+/** CAN IDs and constants for the intake (4 Spark MAXs: pivot, roller, two hopper). */
 public final class IntakeConstants {
     private IntakeConstants() {}
 
@@ -12,8 +12,9 @@ public final class IntakeConstants {
     public static final int kPivotId = 33;
     /** CAN ID for the roller Spark MAX (in/out). */
     public static final int kRollerId = 31;
-    /** CAN ID for the hopper Spark MAX (feeds shooter). */
-    public static final int kHopperId = 60;
+    /** CAN IDs for the two hopper Spark MAXs (run together for feed / spit). */
+    public static final int kHopperMotorACanId = 55;
+    public static final int kHopperMotorBCanId = 60;
 
     /** Pivot position (motor rotations) for stow (retracted). */
     public static final double kPivotStowRotations = 0.0;
@@ -34,14 +35,14 @@ public final class IntakeConstants {
     public static final double kPivotPidToleranceRotations = 0.02;
 
     /** Roller speed [-1, 1] when intaking (positive = pull in). */
-    public static final double kRollerIntakeSpeed = -0.8;
+    public static final double kRollerIntakeSpeed = 0.8;
     /** Roller speed [-1, 1] when outtaking (negative = push out). */
-    public static final double kRollerOuttakeSpeed = 0.8;
+    public static final double kRollerOuttakeSpeed = -0.8;
 
     /** Hopper speed [-1, 1] when feeding the shooter. */
-    public static final double kHopperFeedSpeed = -0.7;
+    public static final double kHopperFeedSpeed = -0.5;
     /** Hopper speed [-1, 1] when spitting out (reverse feed). */
-    public static final double kHopperSpitOutSpeed = 0.7;
+    public static final double kHopperSpitOutSpeed = 0.5;
 
     // ----- Pivot stop-based control (mechanical stops, no encoder setpoints) -----
     /** Normalized speed [-1, 1] for homing toward stow (init / Y+B); keep slow for safety. */

@@ -5,6 +5,7 @@ import com.ctre.phoenix6.SignalLogger;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.networktables.BooleanPublisher;
+import edu.wpi.first.networktables.BooleanSubscriber;
 import edu.wpi.first.networktables.DoublePublisher;
 import edu.wpi.first.networktables.IntegerPublisher;
 import edu.wpi.first.networktables.NetworkTable;
@@ -12,6 +13,7 @@ import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.StringPublisher;
 import edu.wpi.first.networktables.StructPublisher;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
@@ -57,6 +59,19 @@ public final class AutoDiagnostics {
     private static final BooleanPublisher kDefaultDriveScheduled =
             kAuto.getBooleanTopic("defaultDriveScheduled").publish();
 
+    /**
+     * When false (default), high-rate debug streams to NetworkTables and SignalLogger are suppressed.
+     * Writable from SmartDashboard, NT clients, and {@link #setDebugTelemetryEnabled}.
+     */
+    private static final BooleanPublisher kDebugTelemetryEnabledPub =
+            kAuto.getBooleanTopic("debugTelemetryEnabled").publish();
+    private static final BooleanSubscriber kDebugTelemetryEnabledSub =
+            kAuto.getBooleanTopic("debugTelemetryEnabled").subscribe(false);
+
+    private static final String kSmartDashboardDebugTelemetryKey = "Debug/Verbose NT Telemetry";
+
+    private static volatile boolean s_debugTelemetryEnabled = false;
+
     private static final BooleanPublisher kAlliancePresent =
             kPath.getBooleanTopic("alliancePresent").publish();
     private static final BooleanPublisher kFlipPathForRed =
@@ -93,7 +108,40 @@ public final class AutoDiagnostics {
 
     private static int s_eventSeq;
 
+    static {
+        kDebugTelemetryEnabledPub.setDefault(false);
+    }
+
     private AutoDiagnostics() {}
+
+    /** @return whether high-rate debug telemetry to NT and SignalLogger is enabled */
+    public static boolean isDebugTelemetryEnabled() {
+        return s_debugTelemetryEnabled;
+    }
+
+    /**
+     * Sets high-rate debug telemetry. Updates {@code Auto/debugTelemetryEnabled} and SmartDashboard mirror.
+     */
+    public static void setDebugTelemetryEnabled(boolean enabled) {
+        s_debugTelemetryEnabled = enabled;
+        kDebugTelemetryEnabledPub.set(enabled);
+        SmartDashboard.putBoolean(kSmartDashboardDebugTelemetryKey, enabled);
+    }
+
+    /**
+     * Merges SmartDashboard and NetworkTables sources for the debug toggle. Call from {@link Robot#robotPeriodic}.
+     */
+    public static void periodicDebugTelemetrySync() {
+        boolean sd = SmartDashboard.getBoolean(kSmartDashboardDebugTelemetryKey, s_debugTelemetryEnabled);
+        boolean nt = kDebugTelemetryEnabledSub.get();
+        if (sd != s_debugTelemetryEnabled) {
+            s_debugTelemetryEnabled = sd;
+            kDebugTelemetryEnabledPub.set(sd);
+        } else if (nt != s_debugTelemetryEnabled) {
+            s_debugTelemetryEnabled = nt;
+            SmartDashboard.putBoolean(kSmartDashboardDebugTelemetryKey, nt);
+        }
+    }
 
     public static void publishRegisteredNamedCommands(String csv) {
         kRegisteredNamed.set(csv);
@@ -200,11 +248,16 @@ public final class AutoDiagnostics {
 
     public static void recordPathPlannerOutput(ChassisSpeeds discretized, double feedforwardForceSumN) {
         s_outputInvokes++;
+        s_lastPathCommanded = discretized;
+        s_lastPathOutputNs = System.nanoTime();
+
+        if (!isDebugTelemetryEnabled()) {
+            return;
+        }
+
         kOutputInvokes.set(s_outputInvokes);
         SignalLogger.writeDouble("PathFollower/outputInvokeCount", s_outputInvokes, "");
 
-        s_lastPathCommanded = discretized;
-        s_lastPathOutputNs = System.nanoTime();
         kCmdSpeeds.set(discretized);
         kCmdVx.set(discretized.vxMetersPerSecond);
         kCmdVy.set(discretized.vyMetersPerSecond);
@@ -220,6 +273,10 @@ public final class AutoDiagnostics {
     }
 
     public static void publishDriveErrorVsPathFollower(ChassisSpeeds measured) {
+        if (!isDebugTelemetryEnabled()) {
+            return;
+        }
+
         long age = System.nanoTime() - s_lastPathOutputNs;
         boolean recent = age >= 0 && age < kPathOutputStaleNs;
         kPathOutputRecent.set(recent);

@@ -17,18 +17,21 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.IntakeConstants;
 
 /**
- * Intake with 3 SPARK MAXs (REV 2026 Spark API):
+ * Intake with 4 SPARK MAXs (REV 2026 Spark API):
  * - Pivot: up/down via mechanical stops (homing at enable, then stow/collect open-loop + stall detect).
  * - Roller: in/out (duty cycle for intaking/outtaking).
- * - Hopper: feeds game pieces to the shooter.
+ * - Hopper A/B: two motors (CAN {@link IntakeConstants#kHopperMotorACanId} /
+ *   {@link IntakeConstants#kHopperMotorBCanId}) run together to feed the shooter.
  */
 public class IntakeSubsystem extends SubsystemBase {
     private final SparkMax pivotMotor =
             new SparkMax(IntakeConstants.kPivotId, MotorType.kBrushless);
     private final SparkMax rollerMotor =
             new SparkMax(IntakeConstants.kRollerId, MotorType.kBrushless);
-    private final SparkMax hopperMotor =
-            new SparkMax(IntakeConstants.kHopperId, MotorType.kBrushless);
+    private final SparkMax hopperMotorA =
+            new SparkMax(IntakeConstants.kHopperMotorACanId, MotorType.kBrushless);
+    private final SparkMax hopperMotorB =
+            new SparkMax(IntakeConstants.kHopperMotorBCanId, MotorType.kBrushless);
 
     private final RelativeEncoder pivotEncoder = pivotMotor.getEncoder();
 
@@ -49,7 +52,8 @@ public class IntakeSubsystem extends SubsystemBase {
 
         var hopperConfig = new SparkMaxConfig()
                 .idleMode(SparkBaseConfig.IdleMode.kBrake);
-        hopperMotor.configure(hopperConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+        hopperMotorA.configure(hopperConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+        hopperMotorB.configure(hopperConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
     }
 
     @Override
@@ -155,28 +159,33 @@ public class IntakeSubsystem extends SubsystemBase {
         pivotStowed = stowed;
     }
 
-    // ----- Hopper (feed to shooter) -----
+    // ----- Hopper (feed to shooter) — two SPARK MAXs, same duty -----
 
-    /** Run hopper to feed the shooter. */
-    public void runHopper() {
-        hopperMotor.set(IntakeConstants.kHopperFeedSpeed);
+    private void setHopperMotors(double duty) {
+        hopperMotorA.set(-1 *duty);
+        hopperMotorB.set(duty);
     }
 
-    /** Stop hopper. */
+    /** Run both hopper motors to feed the shooter. */
+    public void runHopper() {
+        setHopperMotors(IntakeConstants.kHopperFeedSpeed);
+    }
+
+    /** Stop both hopper motors. */
     public void stopHopper() {
-        hopperMotor.set(0);
+        setHopperMotors(0);
     }
 
     /**
-     * Run hopper at normalized speed [-1, 1] for motor test (open-loop).
+     * Run both hopper motors at normalized speed [-1, 1] for motor test (open-loop).
      */
     public void setHopperSpeed(double speed) {
-        hopperMotor.set(Math.max(-1, Math.min(1, speed)));
+        setHopperMotors(Math.max(-1, Math.min(1, speed)));
     }
 
-    /** Run hopper in reverse (spit out). */
+    /** Run both hopper motors in reverse (spit out). */
     public void runHopperSpitOut() {
-        hopperMotor.set(IntakeConstants.kHopperSpitOutSpeed);
+        setHopperMotors(IntakeConstants.kHopperSpitOutSpeed);
     }
 
     // ----- Composite actions: intake, outtake, stow, collect -----
@@ -221,7 +230,7 @@ public class IntakeSubsystem extends SubsystemBase {
     /** Stop roller, hopper, and pivot (e.g. for motor test). */
     public void stopAll() {
         rollerMotor.set(0);
-        hopperMotor.set(0);
+        setHopperMotors(0);
         pivotMotor.set(0);
     }
 }

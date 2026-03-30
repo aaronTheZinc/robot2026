@@ -21,7 +21,9 @@ import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.util.Arrays;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
@@ -572,6 +574,44 @@ public class LimelightHelpers {
             this.isMegaTag2 = isMegaTag2;
         }
 
+    }
+
+    /**
+     * Robot pose taken only from a Limelight {@code botpose*} / {@code botpose_orb_*} NetworkTables
+     * double-array: x, y at indices 0–1, yaw (degrees) at index 5 ({@link #toPose2D}). Includes latency-adjusted
+     * capture time for {@code addVisionMeasurement}.
+     */
+    public static final class BotPoseNetworkTableSample {
+        /** Copy of the NT array (same layout Limelight publishes). */
+        public final double[] poseArray;
+        /** Built strictly from indices 0, 1, and 5 of {@link #poseArray}. */
+        public final Pose2d pose;
+        public final double timestampSeconds;
+
+        public BotPoseNetworkTableSample(double[] poseArray, Pose2d pose, double timestampSeconds) {
+            this.poseArray = poseArray;
+            this.pose = pose;
+            this.timestampSeconds = timestampSeconds;
+        }
+    }
+
+    /**
+     * Atomically reads the named botpose NT entry. The returned {@link Pose2d} uses only x, y, and yaw from the array.
+     */
+    public static Optional<BotPoseNetworkTableSample> getBotPoseNetworkTableSample(
+            String limelightName, String botposeEntryName) {
+        DoubleArrayEntry poseEntry = getLimelightDoubleArrayEntry(limelightName, botposeEntryName);
+        TimestampedDoubleArray tsValue = poseEntry.getAtomic();
+        double[] raw = tsValue.value;
+        if (raw.length < 6) {
+            return Optional.empty();
+        }
+        double[] poseArray = Arrays.copyOf(raw, raw.length);
+        Pose2d pose = toPose2D(poseArray);
+        double latency = extractArrayEntry(poseArray, 6);
+        long timestamp = tsValue.timestamp;
+        double adjustedTimestamp = (timestamp / 1000000.0) - (latency / 1000.0);
+        return Optional.of(new BotPoseNetworkTableSample(poseArray, pose, adjustedTimestamp));
     }
 
     private static ObjectMapper mapper;

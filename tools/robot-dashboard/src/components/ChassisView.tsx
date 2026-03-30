@@ -3,6 +3,14 @@ import * as THREE from 'three';
 
 const ROBOT_HEIGHT_M = 0.18;
 
+/** Shortest signed angle from current heading to hub-facing ideal (degrees). */
+function hubHeadingErrorDeg(currentDeg: number, idealDeg: number): number {
+  let d = idealDeg - currentDeg;
+  d = ((d % 360) + 360) % 360;
+  if (d > 180) d -= 360;
+  return d;
+}
+
 type ChassisViewProps = {
   fieldLengthM: number;
   fieldWidthM: number;
@@ -15,6 +23,11 @@ type ChassisViewProps = {
   visionPoseY?: number;
   visionHeadingDeg?: number;
   visionPoseVisible?: boolean;
+  /** Hub-facing heading debug (same XY as fused pose, ideal rotation toward hub). */
+  idealShooterPoseX?: number;
+  idealShooterPoseY?: number;
+  idealShooterHeadingDeg?: number;
+  idealShooterPoseVisible?: boolean;
   speedMps: number;
   fieldRelative: boolean;
   targets: { x: number; y: number }[];
@@ -33,6 +46,10 @@ export default function ChassisView({
   visionPoseY,
   visionHeadingDeg,
   visionPoseVisible = false,
+  idealShooterPoseX,
+  idealShooterPoseY,
+  idealShooterHeadingDeg,
+  idealShooterPoseVisible = true,
   speedMps,
   fieldRelative,
   targets,
@@ -43,6 +60,7 @@ export default function ChassisView({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const robotRef = useRef<THREE.Mesh | null>(null);
   const visionRobotRef = useRef<THREE.Mesh | null>(null);
+  const idealShooterRobotRef = useRef<THREE.Mesh | null>(null);
   const targetsRef = useRef<THREE.Group | null>(null);
   const loggedPointsRef = useRef<THREE.Group | null>(null);
   const animationRef = useRef<number | null>(null);
@@ -121,6 +139,26 @@ export default function ChassisView({
     visionRobot.visible = false;
     scene.add(visionRobot);
 
+    const idealShooterMaterial = new THREE.MeshStandardMaterial({
+      color: '#14b8a6',
+      transparent: true,
+      opacity: 0.55,
+      metalness: 0.15,
+      roughness: 0.45,
+    });
+    const idealShooterRobot = new THREE.Mesh(robotGeometry.clone(), idealShooterMaterial);
+    idealShooterRobot.position.y = ROBOT_HEIGHT_M / 2 + 0.03;
+    idealShooterRobot.visible = false;
+    scene.add(idealShooterRobot);
+
+    const idealHeadingArrow = new THREE.ArrowHelper(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, ROBOT_HEIGHT_M / 2 + 0.01, 0),
+      Math.max(robotLengthM, robotWidthM) * 0.55,
+      0x14b8a6
+    );
+    idealShooterRobot.add(idealHeadingArrow);
+
     const headingArrow = new THREE.ArrowHelper(
       new THREE.Vector3(1, 0, 0),
       new THREE.Vector3(0, ROBOT_HEIGHT_M / 2 + 0.01, 0),
@@ -163,6 +201,7 @@ export default function ChassisView({
     cameraRef.current = camera;
     robotRef.current = robot;
     visionRobotRef.current = visionRobot;
+    idealShooterRobotRef.current = idealShooterRobot;
     targetsRef.current = targetsGroup;
     loggedPointsRef.current = loggedPointsGroup;
 
@@ -180,6 +219,8 @@ export default function ChassisView({
       robotMaterial.dispose();
       visionRobot.geometry.dispose();
       visionRobotMaterial.dispose();
+      idealShooterRobot.geometry.dispose();
+      idealShooterMaterial.dispose();
       scene.clear();
       if (renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
@@ -214,6 +255,25 @@ export default function ChassisView({
     visionPoseVisible,
     visionPoseX,
     visionPoseY,
+  ]);
+
+  useEffect(() => {
+    const ideal = idealShooterRobotRef.current;
+    if (!ideal) return;
+    ideal.visible = idealShooterPoseVisible ?? true;
+    if (!ideal.visible) return;
+    const clampedX = THREE.MathUtils.clamp(idealShooterPoseX ?? 0, 0, fieldLengthM);
+    const clampedY = THREE.MathUtils.clamp(idealShooterPoseY ?? 0, 0, fieldWidthM);
+    ideal.position.x = clampedX - fieldLengthM / 2;
+    ideal.position.z = clampedY - fieldWidthM / 2;
+    ideal.rotation.y = THREE.MathUtils.degToRad(idealShooterHeadingDeg ?? 0);
+  }, [
+    fieldLengthM,
+    fieldWidthM,
+    idealShooterHeadingDeg,
+    idealShooterPoseVisible,
+    idealShooterPoseX,
+    idealShooterPoseY,
   ]);
 
   useEffect(() => {
@@ -301,6 +361,22 @@ export default function ChassisView({
           <span className="metric-label">Heading</span>
           <span className="metric-value">{headingDeg.toFixed(1)}°</span>
         </div>
+        {idealShooterPoseVisible && (
+          <>
+            <div className="metric-row">
+              <span className="metric-label">Hub aim (ideal)</span>
+              <span className="metric-value">
+                {(idealShooterHeadingDeg ?? 0).toFixed(1)}°
+              </span>
+            </div>
+            <div className="metric-row">
+              <span className="metric-label">Hub aim Δ</span>
+              <span className="metric-value">
+                {hubHeadingErrorDeg(headingDeg, idealShooterHeadingDeg ?? 0).toFixed(1)}°
+              </span>
+            </div>
+          </>
+        )}
         <div className="metric-row">
           <span className="metric-label">Speed</span>
           <span className="metric-value">{speedMps.toFixed(1)} m/s</span>

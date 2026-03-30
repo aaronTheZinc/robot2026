@@ -112,6 +112,10 @@ export default function AutoDebugPanel({ connected, nt4Enabled, mode, state, onS
                     value={String(state.defaultDriveScheduled)}
                   />
                   <Row
+                    label="Auto / debugTelemetryEnabled"
+                    value={String(state.debugTelemetryEnabled)}
+                  />
+                  <Row
                     label="PathFollower / outputInvokeCount"
                     value={String(state.outputInvokeCount)}
                   />

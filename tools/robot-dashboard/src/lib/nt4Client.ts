@@ -84,6 +84,23 @@ const DEFAULT_TOPICS: TopicConfig[] = [
     },
   },
   {
+    path: '/Pose/idealShooterPose',
+    type: NetworkTablesTypeInfos.kDoubleArray,
+    defaultValue: [0, 0, 0],
+    map: (value) => {
+      if (!Array.isArray(value) || value.length < 3) {
+        return null;
+      }
+      return {
+        idealShooterPose: {
+          x: Number(value[0]) || 0,
+          y: Number(value[1]) || 0,
+          headingDeg: Number(value[2]) || 0,
+        },
+      };
+    },
+  },
+  {
     path: '/Pose/limelightEstimatedPose',
     type: NetworkTablesTypeInfos.kDoubleArray,
     defaultValue: [0, 0, 0],
@@ -403,6 +420,13 @@ const DEFAULT_TOPICS: TopicConfig[] = [
       typeof value === 'boolean' ? { autoDebug: { defaultDriveScheduled: value } } : null,
   },
   {
+    path: '/Auto/debugTelemetryEnabled',
+    type: NetworkTablesTypeInfos.kBoolean,
+    defaultValue: false,
+    map: (value) =>
+      typeof value === 'boolean' ? { autoDebug: { debugTelemetryEnabled: value } } : null,
+  },
+  {
     path: '/PathFollower/outputInvokeCount',
     type: NetworkTablesTypeInfos.kInteger,
     defaultValue: 0,
@@ -675,5 +699,30 @@ export async function createAutoSelectorPublisher(
 
   return {
     setSelectedAuto: (autoName: string) => selectedTopic.setValue(autoName),
+  };
+}
+
+const DEBUG_TELEMETRY_PATH = '/Auto/debugTelemetryEnabled';
+
+export type DebugTelemetryPublisher = {
+  setDebugTelemetryEnabled: (enabled: boolean) => void;
+};
+
+/**
+ * Publishes {@code Auto/debugTelemetryEnabled} so the robot enables/disables high-rate NT + SignalLogger debug.
+ */
+export async function createDebugTelemetryPublisher(
+  uri: string,
+  port: number
+): Promise<DebugTelemetryPublisher> {
+  const nt = NetworkTables.getInstanceByURI(uri, port);
+  const topic = nt.createTopic(
+    DEBUG_TELEMETRY_PATH,
+    NetworkTablesTypeInfos.kBoolean,
+    false as boolean
+  );
+  await topic.publish();
+  return {
+    setDebugTelemetryEnabled: (enabled: boolean) => topic.setValue(enabled),
   };
 }

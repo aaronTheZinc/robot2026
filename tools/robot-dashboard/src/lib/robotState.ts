@@ -52,6 +52,12 @@ export type RobotState = {
     y: number;
     headingDeg: number;
   };
+  /** Hub aim debug: XY from odometry; heading from hub-facing calc (NT Pose/idealShooterPose) */
+  idealShooterPose: {
+    x: number;
+    y: number;
+    headingDeg: number;
+  };
   targets: { x: number; y: number }[];
   /** Robot KNN selected point index from NT /KNN/selectedIndex, or -1 if not set */
   knnSelectedIndex: number;
@@ -93,6 +99,8 @@ export type RobotState = {
     autonomousCommandScheduled: boolean;
     defaultDriveScheduled: boolean;
     outputInvokeCount: number;
+    /** Mirrors Auto/debugTelemetryEnabled on the robot */
+    debugTelemetryEnabled: boolean;
   };
 };
 
@@ -107,6 +115,7 @@ export type RobotStateUpdate = {
   shooter?: Partial<RobotState['shooter']>;
   turret?: Partial<RobotState['turret']>;
   visionPose?: Partial<RobotState['visionPose']>;
+  idealShooterPose?: Partial<RobotState['idealShooterPose']>;
   targets?: RobotState['targets'];
   knnSelectedIndex?: number;
   autoDebug?: Partial<RobotState['autoDebug']>;
@@ -171,6 +180,11 @@ export function createInitialRobotState(mode: RobotMode): RobotState {
       y: 0,
       headingDeg: 0,
     },
+    idealShooterPose: {
+      x: 0,
+      y: 0,
+      headingDeg: 0,
+    },
     targets: [],
     knnSelectedIndex: -1,
     autoDebug: {
@@ -208,6 +222,7 @@ export function createInitialRobotState(mode: RobotMode): RobotState {
       autonomousCommandScheduled: false,
       defaultDriveScheduled: false,
       outputInvokeCount: 0,
+      debugTelemetryEnabled: false,
     },
   };
 }
@@ -227,6 +242,7 @@ export function applyRobotStateUpdate(
     shooter: { ...prev.shooter, ...update.shooter },
     turret: { ...prev.turret, ...update.turret },
     visionPose: { ...prev.visionPose, ...update.visionPose },
+    idealShooterPose: { ...prev.idealShooterPose, ...update.idealShooterPose },
     targets: update.targets !== undefined ? update.targets : prev.targets,
     knnSelectedIndex:
       update.knnSelectedIndex !== undefined

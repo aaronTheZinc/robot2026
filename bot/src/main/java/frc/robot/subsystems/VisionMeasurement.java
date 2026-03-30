@@ -4,15 +4,16 @@
 
 package frc.robot.subsystems;
 
-import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
+import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
-import edu.wpi.first.math.util.Units;
 import edu.wpi.first.networktables.BooleanPublisher;
 import edu.wpi.first.networktables.DoubleArrayPublisher;
 import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.networktables.StringPublisher;
+import edu.wpi.first.networktables.StructPublisher;
 import com.ctre.phoenix6.Utils;
 
 import edu.wpi.first.wpilibj.DriverStation;
@@ -20,251 +21,293 @@ import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
+import java.util.Optional;
+
+import frc.robot.DriveConstants;
 import frc.robot.LimelightHelpers;
-import frc.robot.LimelightHelpers.PoseEstimate;
+import frc.robot.LimelightHelpers.BotPoseNetworkTableSample;
+import frc.robot.VisionConstants;
 
 /**
- * Subsystem that reads Limelight pose estimates and can fuse them with drivetrain odometry.
- * Fusion runs in teleop (when enabled) and when disabled; it does not run during autonomous.
- * Still publishes Limelight status and NT pose topics every cycle.
+ * Reads one or two Limelight {@code botpose*} NT arrays, fuses into the Phoenix pose estimator when the
+ * robot is enabled. Publishes {@code Pose/robotPose} after fusion so dashboards match {@code getState().Pose}.
+ * <p>
+ * Fused {@link Pose2d} struct on NetworkTables: {@code /SmartDashboard/Odometry/FusedPose}.
+ * <p>
+ * Debug: {@code Pose/idealShooterPose} — {@code [x, y]} copied from fused odometry; {@code headingDeg} is
+ * freshly computed so the robot would face the hub from that position ({@link DriveConstants#rotationToFaceHub(Pose2d)}).
  */
 public class VisionMeasurement extends SubsystemBase {
-    private static final String DEFAULT_LIMELIGHT_NAME = "limelight";
-
-    /** Max rotational rate (rotations/sec) above which vision updates are rejected (blur). */
-    private static final double kMaxOmegaRotationsPerSecond = 2.0;
-
-    /** Base standard deviation for x/y (meters) when 1 tag at 0 m. */
-    private static final double kBaseStdDevXY = 0.5;
-    /** Base standard deviation for theta (radians) when 1 tag at 0 m. */
-    private static final double kBaseStdDevTheta = 0.5;
-    /** Scale factor for std dev increase with average tag distance (1/m). */
-    private static final double kDistanceScalePerMeter = 0.2;
-    /** Minimum tag count to apply a vision measurement. */
-    private static final int kMinTagCount = 1;
-
     private final CommandSwerveDrivetrain m_drivetrain;
-    private final String m_limelightName;
+    private final String m_primaryLimelightName;
+    private final String m_secondaryLimelightName;
     private final boolean m_useMegaTag2;
+
     private final DoubleArrayPublisher m_dashboardPosePublisher = NetworkTableInstance.getDefault()
-        .getTable("Pose")
-        .getDoubleArrayTopic("robotPose")
-        .publish();
+            .getTable("Pose")
+            .getDoubleArrayTopic("robotPose")
+            .publish();
+    /** Same format as {@code robotPose}: [x, y, headingDeg] — hub-facing heading at current XY (see class javadoc). */
+    private final DoubleArrayPublisher m_idealShooterPosePublisher = NetworkTableInstance.getDefault()
+            .getTable("Pose")
+            .getDoubleArrayTopic("idealShooterPose")
+            .publish();
+    private final StringPublisher m_poseFieldTypePublisher = NetworkTableInstance.getDefault()
+            .getTable("Pose")
+            .getStringTopic(".type")
+            .publish();
+
     private final DoubleArrayPublisher m_limelightEstimatedPosePublisher = NetworkTableInstance.getDefault()
-        .getTable("Pose")
-        .getDoubleArrayTopic("limelightEstimatedPose")
-        .publish();
+            .getTable("Pose")
+            .getDoubleArrayTopic("limelightEstimatedPose")
+            .publish();
     private final BooleanPublisher m_limelightEstimatedPoseValidPublisher = NetworkTableInstance.getDefault()
-        .getTable("Pose")
-        .getBooleanTopic("limelightEstimatedPoseValid")
-        .publish();
+            .getTable("Pose")
+            .getBooleanTopic("limelightEstimatedPoseValid")
+            .publish();
+
+    private final DoubleArrayPublisher m_limelight2EstimatedPosePublisher = NetworkTableInstance.getDefault()
+            .getTable("Pose")
+            .getDoubleArrayTopic("limelight2EstimatedPose")
+            .publish();
+    private final BooleanPublisher m_limelight2EstimatedPoseValidPublisher = NetworkTableInstance.getDefault()
+            .getTable("Pose")
+            .getBooleanTopic("limelight2EstimatedPoseValid")
+            .publish();
+
     private final double[] m_dashboardPose = new double[3];
+    private final double[] m_idealShooterPose = new double[3];
     private final double[] m_limelightEstimatedPose = new double[3];
-    private boolean m_teleopVisionFusionEnabled = true;
+    private final double[] m_limelight2EstimatedPose = new double[3];
+
+    /** Connection throttle counters for {@link #publishLimelightToSmartDashboard}. */
+    private final int[] m_periodsWithoutDataPrimary = new int[1];
+    private final int[] m_periodsWithoutDataSecondary = new int[1];
+
+    private final StructPublisher<Pose2d> m_fusedPose2dSmartDashboard = NetworkTableInstance.getDefault()
+            .getTable("SmartDashboard")
+            .getSubTable("Odometry")
+            .getStructTopic("FusedPose", Pose2d.struct)
+            .publish();
 
     /**
-     * Creates a vision measurement subsystem that fuses the given Limelight with the drivetrain.
-     *
-     * @param drivetrain    The swerve drivetrain to apply vision measurements to
-     * @param limelightName NetworkTables name of the Limelight (e.g. "limelight")
-     * @param useMegaTag2    Whether to use MegaTag2 pose estimate (botpose_orb_wpi*)
+     * @param drivetrain Drivetrain pose for NT and vision fusion into the Phoenix pose estimator.
+     * @param primaryName NetworkTables name of the primary Limelight (e.g. {@code limelight})
+     * @param secondaryName Second Limelight table name, or null/empty to disable
+     * @param useMegaTag2 Whether to use MegaTag2 pose estimate ({@code botpose_orb_wpi*})
      */
     public VisionMeasurement(
-        CommandSwerveDrivetrain drivetrain,
-        String limelightName,
-        boolean useMegaTag2
-    ) {
+            CommandSwerveDrivetrain drivetrain,
+            String primaryName,
+            String secondaryName,
+            boolean useMegaTag2) {
         m_drivetrain = drivetrain;
-        m_limelightName = limelightName != null && !limelightName.isEmpty() ? limelightName : DEFAULT_LIMELIGHT_NAME;
+        m_primaryLimelightName =
+                primaryName != null && !primaryName.isBlank() ? primaryName : VisionConstants.kPrimaryLimelightName;
+        m_secondaryLimelightName = secondaryName != null && !secondaryName.isBlank() ? secondaryName : null;
         m_useMegaTag2 = useMegaTag2;
     }
 
-    /**
-     * Creates a vision measurement subsystem with default Limelight name "limelight" and MegaTag2.
-     */
+    /** Primary + secondary names from {@link VisionConstants}, MegaTag2. */
     public VisionMeasurement(CommandSwerveDrivetrain drivetrain) {
-        this(drivetrain, DEFAULT_LIMELIGHT_NAME, true);
+        this(
+                drivetrain,
+                VisionConstants.kPrimaryLimelightName,
+                VisionConstants.kSecondaryLimelightName,
+                true);
     }
 
-    /**
-     * Enables or disables applying Limelight vision measurements during teleop.
-     * Normal driver control keeps this off; assist commands can enable it while active.
-     *
-     * @param enabled true to fuse vision during teleop, false to use odometry only
-     */
-    public void setTeleopVisionFusionEnabled(boolean enabled) {
-        m_teleopVisionFusionEnabled = enabled;
-    }
-
-    /**
-     * Computes vision measurement standard deviations [x, y, theta] from tag count and
-     * average tag distance. More tags and closer tags yield tighter (smaller) std devs.
-     */
-    private Matrix<N3, N1> getVisionStdDevs(PoseEstimate estimate) {
-        if (estimate == null || estimate.tagCount < kMinTagCount) {
-            return VecBuilder.fill(Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE);
+    /** Primary Limelight {@code tv} ≥ 1 or secondary (if configured): pipeline has a valid target. */
+    public boolean limelightHasTagLock() {
+        if (LimelightHelpers.getLimelightNTDouble(m_primaryLimelightName, "tv") >= 1.0) {
+            return true;
         }
-        double distFactor = 1.0 + kDistanceScalePerMeter * estimate.avgTagDist;
-        double tagFactor = 1.0 / Math.max(1, estimate.tagCount);
-        double xy = kBaseStdDevXY * distFactor * tagFactor;
-        double theta = kBaseStdDevTheta * distFactor * tagFactor;
-        return VecBuilder.fill(xy, xy, theta);
+        if (m_secondaryLimelightName != null
+                && LimelightHelpers.getLimelightNTDouble(m_secondaryLimelightName, "tv") >= 1.0) {
+            return true;
+        }
+        return false;
     }
 
     @Override
     public void periodic() {
-        publishLimelightToSmartDashboard();
-
-        // Keep the dashboard pose live even when vision fusion is disabled or rejected.
-        publishDashboardPose(m_drivetrain.getState().Pose);
-
         var driveState = m_drivetrain.getState();
         double headingDeg = driveState.Pose.getRotation().getDegrees();
-        double omegaRps = Units.radiansToRotations(driveState.Speeds.omegaRadiansPerSecond);
 
-        LimelightHelpers.SetRobotOrientation(
-            m_limelightName,
-            headingDeg, 0, 0,
-            0, 0, 0
-        );
+        LimelightHelpers.SetRobotOrientation(m_primaryLimelightName, headingDeg, 0, 0, 0, 0, 0);
+        if (m_secondaryLimelightName != null) {
+            LimelightHelpers.SetRobotOrientation(m_secondaryLimelightName, headingDeg, 0, 0, 0, 0, 0);
+        }
 
-        PoseEstimate estimate = getPoseEstimateForAlliance();
-        if (estimate != null
-                && LimelightHelpers.validPoseEstimate(estimate)
-                && estimate.tagCount >= kMinTagCount) {
-            publishLimelightEstimatedPose(estimate.pose);
+        Optional<BotPoseNetworkTableSample> ntPosePrimary =
+                LimelightHelpers.getBotPoseNetworkTableSample(m_primaryLimelightName, botPoseNtEntryName());
+        publishLimelightToSmartDashboard(
+                "Limelight/", m_primaryLimelightName, ntPosePrimary, m_periodsWithoutDataPrimary);
+
+        double tvPrimary = LimelightHelpers.getLimelightNTDouble(m_primaryLimelightName, "tv");
+        boolean validPrimary = tvPrimary >= 1.0 && ntPosePrimary.isPresent();
+        if (validPrimary) {
+            publishLimelightEstimatedPose(
+                    m_limelightEstimatedPose,
+                    m_limelightEstimatedPosePublisher,
+                    m_limelightEstimatedPoseValidPublisher,
+                    ntPosePrimary.get().pose);
+            if (DriverStation.isEnabled()) {
+                fuseBotPoseFromNetworkTables(ntPosePrimary.get());
+            }
         } else {
-            publishLimelightEstimatedPoseInvalid();
+            m_limelightEstimatedPoseValidPublisher.set(false);
         }
 
-        SmartDashboard.putBoolean("Limelight/teleopVisionFusionEnabled", m_teleopVisionFusionEnabled);
+        if (m_secondaryLimelightName != null) {
+            Optional<BotPoseNetworkTableSample> ntPoseSecondary =
+                    LimelightHelpers.getBotPoseNetworkTableSample(m_secondaryLimelightName, botPoseNtEntryName());
+            publishLimelightToSmartDashboard(
+                    "Limelight2/", m_secondaryLimelightName, ntPoseSecondary, m_periodsWithoutDataSecondary);
 
-        // Autonomous: wheel odometry + auto pose reset only (no Limelight into pose estimator).
-        if (DriverStation.isAutonomous()) {
-            return;
+            double tvSecondary = LimelightHelpers.getLimelightNTDouble(m_secondaryLimelightName, "tv");
+            boolean validSecondary = tvSecondary >= 1.0 && ntPoseSecondary.isPresent();
+            if (validSecondary) {
+                publishLimelightEstimatedPose(
+                        m_limelight2EstimatedPose,
+                        m_limelight2EstimatedPosePublisher,
+                        m_limelight2EstimatedPoseValidPublisher,
+                        ntPoseSecondary.get().pose);
+                if (DriverStation.isEnabled()) {
+                    fuseBotPoseFromNetworkTables(ntPoseSecondary.get());
+                }
+            } else {
+                m_limelight2EstimatedPoseValidPublisher.set(false);
+            }
         }
 
-        // Teleop: encoder odometry unless a driver assist enables fusion.
-        if (DriverStation.isTeleop() && !m_teleopVisionFusionEnabled) {
-            return;
-        }
+        publishFusedRobotPoseToDashboard(m_drivetrain.getState().Pose);
+    }
 
-        if (estimate == null || !LimelightHelpers.validPoseEstimate(estimate)) {
-            return;
+    /** {@code botpose_orb_wpi*} when MegaTag2, else {@code botpose_wpi*}, matching alliance. */
+    private String botPoseNtEntryName() {
+        boolean isRed = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red;
+        if (m_useMegaTag2) {
+            return isRed ? "botpose_orb_wpired" : "botpose_orb_wpiblue";
         }
-        if (estimate.tagCount < kMinTagCount) {
-            return;
-        }
-        if (Math.abs(omegaRps) >= kMaxOmegaRotationsPerSecond) {
-            return;
-        }
+        return isRed ? "botpose_wpired" : "botpose_wpiblue";
+    }
 
-        Matrix<N3, N1> stdDevs = getVisionStdDevs(estimate);
-        m_drivetrain.addVisionMeasurement(
-            estimate.pose,
-            estimate.timestampSeconds,
-            stdDevs
-        );
-
-        publishDashboardPose(m_drivetrain.getState().Pose);
+    private void fuseBotPoseFromNetworkTables(BotPoseNetworkTableSample sample) {
+        Matrix<N3, N1> stdDevs = m_useMegaTag2
+                ? VecBuilder.fill(
+                        DriveConstants.kMegaTag2VisionStdDevXMeters,
+                        DriveConstants.kMegaTag2VisionStdDevYMeters,
+                        DriveConstants.kMegaTag2VisionStdDevThetaRadians)
+                : VecBuilder.fill(
+                        DriveConstants.kMegaTag1VisionStdDevXMeters,
+                        DriveConstants.kMegaTag1VisionStdDevYMeters,
+                        DriveConstants.kMegaTag1VisionStdDevThetaRadians);
+        m_drivetrain.addVisionMeasurement(sample.pose, sample.timestampSeconds, stdDevs);
     }
 
     private static final int kLogThrottlePeriods = 100;
 
-    private int m_periodsWithoutData;
+    /** Forwards Limelight NetworkTables values to SmartDashboard under the given prefix. */
+    private void publishLimelightToSmartDashboard(
+            String sdPrefix,
+            String llName,
+            Optional<BotPoseNetworkTableSample> ntPose,
+            int[] periodsWithoutDataCounter) {
+        double tv = LimelightHelpers.getLimelightNTDouble(llName, "tv");
+        double getpipe = LimelightHelpers.getLimelightNTDouble(llName, "getpipe");
+        String getpipetype = LimelightHelpers.getLimelightNTString(llName, "getpipetype");
 
-    /** Forwards Limelight NetworkTables values to SmartDashboard under the "Limelight/" prefix. */
-    private void publishLimelightToSmartDashboard() {
-        String p = "Limelight/";
-
-        double tv = LimelightHelpers.getLimelightNTDouble(m_limelightName, "tv");
-        double getpipe = LimelightHelpers.getLimelightNTDouble(m_limelightName, "getpipe");
-        String getpipetype = LimelightHelpers.getLimelightNTString(m_limelightName, "getpipetype");
-
-        // Detect if we're getting any data from the Limelight (getpipe is set by camera; default 0)
         boolean hasConnection = getpipetype != null && !getpipetype.isEmpty();
         String status;
         if (!hasConnection) {
             status = "No data (Limelight not connected to this NT server)";
-            m_periodsWithoutData++;
-            if (Utils.isSimulation() && m_periodsWithoutData == 1) {
-                SmartDashboard.putString(p + "help",
-                    "In sim use http://localhost:5801 for Limelight config; set NT server to this PC's IP.");
+            periodsWithoutDataCounter[0]++;
+            if (Utils.isSimulation() && periodsWithoutDataCounter[0] == 1) {
+                SmartDashboard.putString(
+                        sdPrefix + "help",
+                        "In sim use http://localhost:5801 for Limelight config; set NT server to this PC's IP.");
             }
-            if (m_periodsWithoutData % kLogThrottlePeriods == 1) {
+            if (periodsWithoutDataCounter[0] % kLogThrottlePeriods == 1) {
                 DriverStation.reportWarning(
-                    "Limelight: No NetworkTables data from \"" + m_limelightName + "\". "
-                        + (Utils.isSimulation()
-                            ? "In simulation set Limelight NT server to this computer's IP (http://localhost:5801)."
-                            : "Check Limelight power and team number / NT server setting."),
-                    false);
+                        "Limelight: No NetworkTables data from \""
+                                + llName
+                                + "\". "
+                                + (Utils.isSimulation()
+                                        ? "In simulation set Limelight NT server to this computer's IP (http://localhost:5801)."
+                                        : "Check Limelight power and team number / NT server setting."),
+                        false);
             }
         } else {
-            m_periodsWithoutData = 0;
+            periodsWithoutDataCounter[0] = 0;
             status = tv >= 1.0 ? "Target" : "No target";
-            SmartDashboard.putString(p + "help", ""); // clear help when connected
+            SmartDashboard.putString(sdPrefix + "help", "");
         }
-        SmartDashboard.putString(p + "status", status);
+        SmartDashboard.putString(sdPrefix + "status", status);
 
-        SmartDashboard.putNumber(p + "tv", tv);
-        SmartDashboard.putNumber(p + "tx", LimelightHelpers.getLimelightNTDouble(m_limelightName, "tx"));
-        SmartDashboard.putNumber(p + "ty", LimelightHelpers.getLimelightNTDouble(m_limelightName, "ty"));
-        SmartDashboard.putNumber(p + "ta", LimelightHelpers.getLimelightNTDouble(m_limelightName, "ta"));
-        SmartDashboard.putNumber(p + "tid", LimelightHelpers.getLimelightNTDouble(m_limelightName, "tid"));
-        SmartDashboard.putNumber(p + "tl", LimelightHelpers.getLimelightNTDouble(m_limelightName, "tl"));
-        SmartDashboard.putNumber(p + "cl", LimelightHelpers.getLimelightNTDouble(m_limelightName, "cl"));
-        SmartDashboard.putNumber(p + "getpipe", getpipe);
-        SmartDashboard.putString(p + "getpipetype", getpipetype != null ? getpipetype : "");
+        SmartDashboard.putNumber(sdPrefix + "tv", tv);
+        SmartDashboard.putNumber(sdPrefix + "tx", LimelightHelpers.getLimelightNTDouble(llName, "tx"));
+        SmartDashboard.putNumber(sdPrefix + "ty", LimelightHelpers.getLimelightNTDouble(llName, "ty"));
+        SmartDashboard.putNumber(sdPrefix + "ta", LimelightHelpers.getLimelightNTDouble(llName, "ta"));
+        SmartDashboard.putNumber(sdPrefix + "tid", LimelightHelpers.getLimelightNTDouble(llName, "tid"));
+        SmartDashboard.putNumber(sdPrefix + "tl", LimelightHelpers.getLimelightNTDouble(llName, "tl"));
+        SmartDashboard.putNumber(sdPrefix + "cl", LimelightHelpers.getLimelightNTDouble(llName, "cl"));
+        SmartDashboard.putNumber(sdPrefix + "getpipe", getpipe);
+        SmartDashboard.putString(sdPrefix + "getpipetype", getpipetype != null ? getpipetype : "");
 
-        boolean isRed = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red;
-        String poseKey = isRed ? "botpose_wpired" : "botpose_wpiblue";
-        double[] botpose = LimelightHelpers.getLimelightNTDoubleArray(m_limelightName, poseKey);
-        if (botpose != null && botpose.length >= 6) {
-            SmartDashboard.putNumber(p + "pose_x", botpose[0]);
-            SmartDashboard.putNumber(p + "pose_y", botpose[1]);
-            SmartDashboard.putNumber(p + "pose_z", botpose[2]);
-            SmartDashboard.putNumber(p + "pose_roll", botpose[3]);
-            SmartDashboard.putNumber(p + "pose_pitch", botpose[4]);
-            SmartDashboard.putNumber(p + "pose_yaw", botpose[5]);
+        SmartDashboard.putString(sdPrefix + "pose_nt_key", botPoseNtEntryName());
+        if (ntPose.isPresent()) {
+            double[] botpose = ntPose.get().poseArray;
+            SmartDashboard.putNumber(sdPrefix + "pose_x", botpose[0]);
+            SmartDashboard.putNumber(sdPrefix + "pose_y", botpose[1]);
+            SmartDashboard.putNumber(sdPrefix + "pose_z", botpose[2]);
+            SmartDashboard.putNumber(sdPrefix + "pose_roll", botpose[3]);
+            SmartDashboard.putNumber(sdPrefix + "pose_pitch", botpose[4]);
+            SmartDashboard.putNumber(sdPrefix + "pose_yaw", botpose[5]);
             if (botpose.length >= 11) {
-                SmartDashboard.putNumber(p + "latency_ms", botpose[6]);
-                SmartDashboard.putNumber(p + "tag_count", botpose[7]);
-                SmartDashboard.putNumber(p + "tag_span", botpose[8]);
-                SmartDashboard.putNumber(p + "tag_dist", botpose[9]);
-                SmartDashboard.putNumber(p + "tag_area", botpose[10]);
+                SmartDashboard.putNumber(sdPrefix + "latency_ms", botpose[6]);
+                SmartDashboard.putNumber(sdPrefix + "tag_count", botpose[7]);
+                SmartDashboard.putNumber(sdPrefix + "tag_span", botpose[8]);
+                SmartDashboard.putNumber(sdPrefix + "tag_dist", botpose[9]);
+                SmartDashboard.putNumber(sdPrefix + "tag_area", botpose[10]);
             }
         }
     }
 
-    private PoseEstimate getPoseEstimateForAlliance() {
-        boolean isRed = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red;
-        if (m_useMegaTag2) {
-            return isRed
-                ? LimelightHelpers.getBotPoseEstimate_wpiRed_MegaTag2(m_limelightName)
-                : LimelightHelpers.getBotPoseEstimate_wpiBlue_MegaTag2(m_limelightName);
-        } else {
-            return isRed
-                ? LimelightHelpers.getBotPoseEstimate_wpiRed(m_limelightName)
-                : LimelightHelpers.getBotPoseEstimate_wpiBlue(m_limelightName);
-        }
-    }
-
-    private void publishDashboardPose(Pose2d pose) {
+    private void publishFusedRobotPoseToDashboard(Pose2d pose) {
+        m_poseFieldTypePublisher.set("Field2d");
         m_dashboardPose[0] = pose.getX();
         m_dashboardPose[1] = pose.getY();
         m_dashboardPose[2] = pose.getRotation().getDegrees();
         m_dashboardPosePublisher.set(m_dashboardPose);
+
+        double odometryX = pose.getX();
+        double odometryY = pose.getY();
+        var hubFacingRotation = DriveConstants.rotationToFaceHub(pose);
+        m_idealShooterPose[0] = odometryX;
+        m_idealShooterPose[1] = odometryY;
+        m_idealShooterPose[2] = hubFacingRotation.getDegrees();
+        m_idealShooterPosePublisher.set(m_idealShooterPose);
+
+        m_fusedPose2dSmartDashboard.set(pose);
+
+        SmartDashboard.putNumber("Odometry/pose_x", pose.getX());
+        SmartDashboard.putNumber("Odometry/pose_y", pose.getY());
+        SmartDashboard.putNumber("Odometry/pose_z", 0.0);
+        SmartDashboard.putNumber("Odometry/pose_roll", 0.0);
+        SmartDashboard.putNumber("Odometry/pose_pitch", 0.0);
+        SmartDashboard.putNumber("Odometry/pose_yaw", pose.getRotation().getDegrees());
     }
 
-    private void publishLimelightEstimatedPose(Pose2d pose) {
-        m_limelightEstimatedPose[0] = pose.getX();
-        m_limelightEstimatedPose[1] = pose.getY();
-        m_limelightEstimatedPose[2] = pose.getRotation().getDegrees();
-        m_limelightEstimatedPosePublisher.set(m_limelightEstimatedPose);
-        m_limelightEstimatedPoseValidPublisher.set(true);
-    }
-
-    private void publishLimelightEstimatedPoseInvalid() {
-        m_limelightEstimatedPoseValidPublisher.set(false);
+    private static void publishLimelightEstimatedPose(
+            double[] buffer,
+            DoubleArrayPublisher posePub,
+            BooleanPublisher validPub,
+            Pose2d pose) {
+        buffer[0] = pose.getX();
+        buffer[1] = pose.getY();
+        buffer[2] = pose.getRotation().getDegrees();
+        posePub.set(buffer);
+        validPub.set(true);
     }
 }

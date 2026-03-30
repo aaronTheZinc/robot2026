@@ -35,6 +35,7 @@ public class ShooterCommands {
                 .finallyDo(shooter::stopShooter);
     }
 
+    /** Runs hood + closed-loop shooter at the given profile until interrupted. */
     public Command getRunShotProfileCommand(double hoodAngleDeg, double rpm) {
         return Commands.run(
                 () -> {

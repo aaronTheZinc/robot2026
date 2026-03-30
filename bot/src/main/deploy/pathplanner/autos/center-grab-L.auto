@@ -7,13 +7,13 @@
         {
           "type": "path",
           "data": {
-            "pathName": "straight-back"
+            "pathName": "center-grab-left"
           }
         },
         {
-          "type": "named",
+          "type": "path",
           "data": {
-            "name": "Wing Shot"
+            "pathName": "center-grab-left-back"
           }
         }
       ]

@@ -15,11 +15,13 @@ import type { ConnectionConfig, DashboardMode } from './screens/ConnectionScreen
 import {
   connectRobotStateSubscription,
   createAutoSelectorPublisher,
+  createDebugTelemetryPublisher,
   createMotorTestPublisher,
   createShooterSetpointPublisher,
 } from './lib/nt4Client';
 import type {
   AutoSelectorPublisher,
+  DebugTelemetryPublisher,
   MotorTestPublisher,
   ShooterSetpointPublisher,
 } from './lib/nt4Client';
@@ -261,6 +263,7 @@ function App() {
   const motorTestPublisherRef = useRef<MotorTestPublisher | null>(null);
   const shooterSetpointPublisherRef = useRef<ShooterSetpointPublisher | null>(null);
   const autoSelectorPublisherRef = useRef<AutoSelectorPublisher | null>(null);
+  const debugTelemetryPublisherRef = useRef<DebugTelemetryPublisher | null>(null);
 
   const visibleTabs =
     dashboardMode === 'competition' ? COMPETITION_TABS : DEBUG_TABS;
@@ -435,12 +438,14 @@ function App() {
       createMotorTestPublisher(uri, port),
       createShooterSetpointPublisher(uri, port),
       createAutoSelectorPublisher(uri, port),
+      createDebugTelemetryPublisher(uri, port),
     ])
-      .then(([motorPub, shooterPub, autoSelectorPub]) => {
+      .then(([motorPub, shooterPub, autoSelectorPub, debugPub]) => {
         if (!cancelled) {
           motorTestPublisherRef.current = motorPub;
           shooterSetpointPublisherRef.current = shooterPub;
           autoSelectorPublisherRef.current = autoSelectorPub;
+          debugTelemetryPublisherRef.current = debugPub;
         }
       })
       .catch(() => {
@@ -448,6 +453,7 @@ function App() {
           motorTestPublisherRef.current = null;
           shooterSetpointPublisherRef.current = null;
           autoSelectorPublisherRef.current = null;
+          debugTelemetryPublisherRef.current = null;
         }
       });
     return () => {
@@ -458,6 +464,7 @@ function App() {
       motorTestPublisherRef.current = null;
       shooterSetpointPublisherRef.current = null;
       autoSelectorPublisherRef.current = null;
+      debugTelemetryPublisherRef.current = null;
     };
   }, [mode, nt4Enabled, state.connected, uri, port]);
 
@@ -791,6 +798,10 @@ function App() {
             visionPoseY={state.visionPose.y}
             visionHeadingDeg={state.visionPose.headingDeg}
             visionPoseVisible={state.visionPose.valid}
+            idealShooterPoseX={state.idealShooterPose.x}
+            idealShooterPoseY={state.idealShooterPose.y}
+            idealShooterHeadingDeg={state.idealShooterPose.headingDeg}
+            idealShooterPoseVisible={state.connected}
             speedMps={state.swerve.speedMps}
             fieldRelative={state.swerve.fieldRelative}
             targets={state.targets}
@@ -867,6 +878,23 @@ function App() {
             >
               {nt4Enabled ? 'Disconnect' : 'Connect'}
             </button>
+          </div>
+          <div className="control-row">
+            <label>Verbose NT debug</label>
+            <button
+              type="button"
+              disabled={mode !== 'nt4' || !nt4Enabled || !state.connected}
+              onClick={() => {
+                const next = !state.autoDebug.debugTelemetryEnabled;
+                applyUpdate({ autoDebug: { debugTelemetryEnabled: next } });
+                debugTelemetryPublisherRef.current?.setDebugTelemetryEnabled(next);
+              }}
+            >
+              {state.autoDebug.debugTelemetryEnabled ? 'On (high-rate)' : 'Off (default)'}
+            </button>
+            <span className="hint" style={{ flex: 1 }}>
+              Robot publishes DriveState, PathFollower, and SignalLogger streams only when on.
+            </span>
           </div>
           <div className="hint">
             Configure the NT4 host for match ops. Mock mode simulates telemetry while
