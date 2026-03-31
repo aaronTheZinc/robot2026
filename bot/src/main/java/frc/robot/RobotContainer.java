@@ -64,20 +64,6 @@ public class RobotContainer {
     private final SwerveRequest.FieldCentric drive = new SwerveRequest.FieldCentric()
             .withDeadband(MaxSpeed * 0.1).withRotationalDeadband(MaxAngularRate * 0.1) // Add a 10% deadband
             .withDriveRequestType(DriveRequestType.OpenLoopVoltage); // Use open-loop control for drive motors
-    /**
-     * While holding KNN shot (operator A): face {@link KnnInterpreter#getNearestAimRotation()} from nearest map
-     * sample's {@code shootTarget}, with driver translation on joystick 0.
-     */
-    private final SwerveRequest.FieldCentricFacingAngle knnAimFacing =
-            new SwerveRequest.FieldCentricFacingAngle()
-                    .withHeadingPID(
-                            DriveConstants.kHubFacingHeadingKp,
-                            DriveConstants.kHubFacingHeadingKi,
-                            DriveConstants.kHubFacingHeadingKd)
-                    .withDeadband(DriveConstants.kHubFacingDeadbandMps)
-                    .withRotationalDeadband(DriveConstants.kHubFacingRotationalDeadbandRad)
-                    .withMaxAbsRotationalRate(DriveConstants.kHubFacingMaxAngularRateRadPerSec)
-                    .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
     private final SwerveRequest.SwerveDriveBrake brake = new SwerveRequest.SwerveDriveBrake();
     private final SwerveRequest.PointWheelsAt point = new SwerveRequest.PointWheelsAt();
     private final SwerveRequest.RobotCentric forwardStraight = new SwerveRequest.RobotCentric()
@@ -271,24 +257,12 @@ public class RobotContainer {
                         DriverStation.reportWarning("KNN: knn_map.json missing or has no points", false);
                         return Commands.none();
                     }
-                    Command shot =
-                            getKnnMapHeldShotSequenceCommand(
-                                            knnInterpreter.getInterpolatedHoodDeg(),
-                                            knnInterpreter.getInterpolatedRpm())
-                                    .withName("KNN held shot (inferred)");
-                    Command faceAim =
-                            drivetrain.applyRequest(
-                                    () -> {
-                                        knnInterpreter.update(drivetrain.getState().Pose);
-                                        return knnAimFacing
-                                                .withVelocityX(-joystick.getLeftY() * MaxSpeed)
-                                                .withVelocityY(-joystick.getLeftX() * MaxSpeed)
-                                                .withTargetDirection(
-                                                        knnInterpreter.getNearestAimRotation());
-                                    });
-                    return Commands.parallel(shot, faceAim).withName("KNN held shot + aim");
+                    return getKnnMapHeldShotSequenceCommand(
+                                    knnInterpreter.getInterpolatedHoodDeg(),
+                                    knnInterpreter.getInterpolatedRpm())
+                            .withName("KNN held shot (inferred)");
                 },
-                Set.of(shooter, intake, drivetrain));
+                Set.of(shooter, intake));
     }
 
     private Pose2d getDriveAssistTargetPose() {
@@ -423,7 +397,8 @@ public class RobotContainer {
      * When {@link KnnConstants#kInterpolateHoodWhileDriving} is true, continuously sets hood angle from IDW
      * of the nearest map points while driving. Shooter RPM is not driven here — use driver R3 to apply
      * {@link KnnInterpreter#getInterpolatedRpm()} once, or use shot buttons. Skips hood updates while
-     * another command is using the shooter. Re-enable dashboard slider ownership when the constant is false.
+     * another command is using the shooter, or while dashboard ownership is off (e.g. during a shot profile).
+     * Re-enable dashboard slider ownership when the constant is false.
      * Call from {@code Robot.robotPeriodic} after {@code CommandScheduler.run()}.
      */
     public void applyKnnHoodInterpolation() {

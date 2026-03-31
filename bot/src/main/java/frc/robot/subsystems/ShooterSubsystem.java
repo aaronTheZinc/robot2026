@@ -21,6 +21,7 @@ import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
 import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 import java.util.Map;
@@ -293,7 +294,10 @@ public class ShooterSubsystem extends SubsystemBase {
 
     @Override
     public void periodic() {
-        if (dashboardSetpointControlEnabled) {
+        // Do not overwrite hood/RPM from sliders/NT while a command requires this subsystem (e.g. shot profile).
+        // Otherwise a profile's finallyDo can re-enable dashboard for one cycle and fight closed-loop hood/RPM.
+        if (dashboardSetpointControlEnabled
+                && CommandScheduler.getInstance().requiring(this) == null) {
             // Apply setpoints from slider input: robot-dashboard (NT) takes priority, else SmartDashboard sliders
             double hoodInput = shooterTable.getEntry("hoodSetpointInput").getDouble(Double.NaN);
             double hoodToApply = Double.isNaN(hoodInput) ? hoodSliderEntry.getDouble(hoodSetpointDeg) : hoodInput;
