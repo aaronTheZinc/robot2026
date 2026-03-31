@@ -4,13 +4,58 @@
  * robot interpreter can align on the same selection.
  */
 
+/** Scoring / inspection aim for this map sample. Omitted or `hub` = hub shot (default). */
+export type KnnShootTarget =
+  | { kind: 'hub' }
+  | { kind: 'field'; x: number; y: number; label?: string };
+
 export type KnnPoint = {
   x: number;
   y: number;
   headingDeg?: number;
   shooterRpm?: number;
   hoodDeg?: number;
+  /** Persisted aim for simulation / export; default is hub when absent. */
+  shootTarget?: KnnShootTarget;
 };
+
+export function normalizeKnnShootTarget(raw: unknown): KnnShootTarget | undefined {
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+  if (typeof raw !== 'object') {
+    return undefined;
+  }
+  const o = raw as Record<string, unknown>;
+  if (o.kind === 'hub') {
+    return { kind: 'hub' };
+  }
+  if (
+    o.kind === 'field' &&
+    typeof o.x === 'number' &&
+    typeof o.y === 'number' &&
+    Number.isFinite(o.x) &&
+    Number.isFinite(o.y)
+  ) {
+    const label = typeof o.label === 'string' && o.label.trim().length > 0 ? o.label.trim() : undefined;
+    return { kind: 'field', x: o.x, y: o.y, ...(label ? { label } : {}) };
+  }
+  return undefined;
+}
+
+/** Default aim for new or legacy points (not stored on disk until export if you omit the key). */
+export function defaultKnnShootTarget(): KnnShootTarget {
+  return { kind: 'hub' };
+}
+
+export function formatKnnShootTargetSummary(point: KnnPoint): string {
+  const st = point.shootTarget;
+  if (st?.kind === 'field') {
+    const coord = `(${st.x.toFixed(2)}, ${st.y.toFixed(2)})`;
+    return st.label ? `${st.label} ${coord}` : coord;
+  }
+  return 'Hub';
+}
 
 export type KnnInferenceConfig = {
   /** Weight for x distance (default 1) */

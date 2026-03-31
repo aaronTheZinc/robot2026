@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { inferKnn } from '../lib/knnInference';
+import { formatKnnShootTargetSummary, inferKnn } from '../lib/knnInference';
 import type { KnnPoint } from '../lib/knnInference';
 
 const CELL_SIZE_M = 1.0;
@@ -176,6 +176,7 @@ export default function KnnGridView({
                   <th>Heading (deg)</th>
                   <th>Shooter RPM</th>
                   <th>Hood (deg)</th>
+                  <th>Shoot target</th>
                   <th>Inferred</th>
                   <th>Action</th>
                 </tr>
@@ -258,6 +259,9 @@ export default function KnnGridView({
                       ) : (
                         (pt.hoodDeg ?? 0).toFixed(1)
                       )}
+                    </td>
+                    <td className="knn-shoot-target-cell" title="Saved in map; export includes shootTarget">
+                      {formatKnnShootTargetSummary(pt)}
                     </td>
                     <td>{idx === inferredIndex ? 'Yes' : '—'}</td>
                     <td>

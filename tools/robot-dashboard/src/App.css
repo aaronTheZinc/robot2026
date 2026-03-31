@@ -171,6 +171,443 @@
   min-height: 0;
 }
 
+/* Drag simulation panels from the title (see simulation-panel-drag-handle). */
+.simulation-panel-drag-handle {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.simulation-panel-drag-handle:active {
+  cursor: grabbing;
+}
+
+.simulation-aim-panel {
+  position: absolute;
+  left: 14px;
+  bottom: 52px;
+  max-width: min(280px, calc(100vw - 28px));
+  padding: 12px 14px;
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid #3b4c6b;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  z-index: 5;
+}
+
+.simulation-aim-panel h3 {
+  margin: 0 0 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #93c5fd;
+}
+
+.simulation-aim-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.simulation-aim-row button {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.simulation-aim-row button:hover:not(:disabled) {
+  background: #334155;
+}
+
+.simulation-aim-row button.active {
+  border-color: #38bdf8;
+  background: #0c4a6e;
+  color: #f0f9ff;
+}
+
+.simulation-aim-row button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.simulation-aim-sub {
+  margin: 12px 0 6px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.simulation-aim-hint {
+  margin: 0 0 10px;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  line-height: 1.45;
+}
+
+.simulation-aim-hint strong {
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+.simulation-aim-origin-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  font-size: 0.78rem;
+  color: #cbd5e1;
+}
+
+.simulation-aim-origin-built-in {
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  border-radius: 6px;
+  background: rgba(30, 41, 59, 0.9);
+  border: 1px solid #334155;
+}
+
+.simulation-aim-origin-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.simulation-aim-name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background: #0f172a;
+  color: #f1f5f9;
+  font-size: 0.78rem;
+}
+
+.simulation-aim-name-input:focus {
+  outline: none;
+  border-color: #38bdf8;
+}
+
+.simulation-aim-place-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.simulation-aim-place-row button {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.simulation-aim-place-row button:hover {
+  background: #334155;
+}
+
+.simulation-aim-place-row button.simulation-place-active {
+  border-color: #34d399;
+  background: #064e3b;
+  color: #d1fae5;
+}
+
+.simulation-aim-select-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+  font-size: 0.68rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.simulation-aim-select-label select {
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.8rem;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.simulation-aim-drop-name {
+  width: 100%;
+  margin-bottom: 2px;
+}
+
+.simulation-aim-drop-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.simulation-aim-drop-actions button:first-child {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.simulation-aim-drop-actions button:first-child:hover {
+  background: #334155;
+}
+
+.simulation-aim-drop-actions button:first-child.active {
+  border-color: #fbbf24;
+  background: #422006;
+  color: #fef3c7;
+}
+
+.simulation-aim-drop-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.simulation-aim-drop-list li {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 8px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: rgba(30, 41, 59, 0.65);
+  border: 1px solid #334155;
+}
+
+.simulation-aim-remove {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid #64748b;
+  background: #334155;
+  color: #fca5a5;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.simulation-aim-remove:hover {
+  background: #7f1d1d;
+  border-color: #f87171;
+}
+
+.simulation-inspect-panel {
+  position: absolute;
+  right: 14px;
+  bottom: 52px;
+  max-width: min(340px, calc(100vw - 28px));
+  padding: 14px 16px;
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid #3b4c6b;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  z-index: 5;
+}
+
+.simulation-inspect-panel h3 {
+  margin: 0 0 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7dd3fc;
+}
+
+.simulation-inspect-note {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  line-height: 1.45;
+}
+
+.simulation-inspect-note code {
+  color: #cbd5e1;
+  font-size: 0.92em;
+}
+
+.simulation-inspect-note-compact {
+  margin-bottom: 8px;
+  font-size: 0.74rem;
+}
+
+.simulation-inspect-note-wait {
+  margin-top: 4px;
+  color: #a8b3c9;
+}
+
+.simulation-inspect-aim-picker {
+  margin-bottom: 10px;
+}
+
+.simulation-inspect-aim-picker-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.simulation-inspect-aim-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.simulation-inspect-aim-chips button {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 0.78rem;
+  cursor: pointer;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.simulation-inspect-aim-chips button:hover {
+  background: #334155;
+}
+
+.simulation-inspect-aim-chips button.active {
+  border-color: #38bdf8;
+  background: #0c4a6e;
+  color: #f0f9ff;
+}
+
+.simulation-inspect-place-sample {
+  margin-bottom: 12px;
+}
+
+.simulation-inspect-place-sample-btn {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #0369a1;
+  background: #075985;
+  color: #f0f9ff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.simulation-inspect-place-sample-btn:hover {
+  background: #0c4a6e;
+  border-color: #38bdf8;
+}
+
+.simulation-inspect-aim-picker-saved-note {
+  margin: 8px 0 0;
+  font-size: 0.72rem;
+  color: #a8b3c9;
+  line-height: 1.4;
+}
+
+.simulation-inspect-persist-target {
+  margin-bottom: 12px;
+}
+
+.simulation-inspect-persist-target-btn {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #4c7c5f;
+  background: #14532d;
+  color: #ecfdf5;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.simulation-inspect-persist-target-btn:hover {
+  background: #166534;
+  border-color: #86efac;
+}
+
+.simulation-inspect-persist-hint {
+  margin: 6px 0 0;
+  font-size: 0.68rem;
+  color: #94a3b8;
+  line-height: 1.45;
+}
+
+.simulation-inspect-persist-hint code {
+  color: #cbd5e1;
+  font-size: 0.95em;
+}
+
+.simulation-inspect-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  font-size: 0.88rem;
+  color: #e2e8f0;
+}
+
+.simulation-inspect-grid dt {
+  margin: 0;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.simulation-inspect-grid dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.simulation-inspect-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.simulation-inspect-actions button {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.simulation-inspect-actions button:hover {
+  background: #334155;
+}
+
 .simulation-nav-hint {
   position: absolute;
   top: 12px;
@@ -220,6 +657,8 @@
   flex-direction: column;
   gap: 6px;
   padding: 12px 14px;
+  max-height: min(92vh, 520px);
+  overflow-y: auto;
   background: rgba(20, 27, 45, 0.92);
   border: 1px solid #2d3b58;
   border-radius: 10px;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import './App.css';
 import CameraView from './components/CameraView';
@@ -31,12 +31,59 @@ import {
   nextMockState,
 } from './lib/robotState';
 import type { RobotMode, RobotStateUpdate } from './lib/robotState';
-import type { KnnPoint } from './lib/knnInference';
+import {
+  normalizeKnnShootTarget,
+  type KnnPoint,
+  type KnnShootTarget,
+} from './lib/knnInference';
+import {
+  newSimDropTargetId,
+  normalizeSimDropTargets,
+  type SimDropTarget,
+} from './lib/simDropTargets';
+import {
+  newSimNamedOriginId,
+  normalizeSimNamedOrigins,
+  SIM_HUB_ORIGIN_ID,
+  type SimNamedOrigin,
+} from './lib/simFieldOrigins';
+import deployKnnMapJson from '../../../bot/src/main/deploy/knn_map.json';
 
 const STORAGE_KEY_URI = 'robot-dashboard-uri';
 const STORAGE_KEY_PORT = 'robot-dashboard-port';
 const STORAGE_KEY_DASHBOARD_MODE = 'robot-dashboard-mode';
 const STORAGE_KEY_KNN_MAP = 'robot-dashboard-knn-map-v1';
+const STORAGE_KEY_SIM_AIM = 'robot-dashboard-sim-aim-v1';
+
+type SimAimKind = 'hub' | 'drop';
+
+function loadPersistedSimAim(): {
+  dropTargets: SimDropTarget[];
+  namedOrigins: SimNamedOrigin[];
+  aimKind: SimAimKind;
+  selectedDropId: string | null;
+} {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SIM_AIM);
+    if (!raw) {
+      return { dropTargets: [], namedOrigins: [], aimKind: 'hub', selectedDropId: null };
+    }
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    const dropTargets = normalizeSimDropTargets(o.dropTargets);
+    const namedOrigins = normalizeSimNamedOrigins(o.namedOrigins);
+    const aimKind: SimAimKind = o.aimKind === 'drop' ? 'drop' : 'hub';
+    let selectedDropId = typeof o.selectedDropId === 'string' ? o.selectedDropId : null;
+    if (selectedDropId && !dropTargets.some((d) => d.id === selectedDropId)) {
+      selectedDropId = null;
+    }
+    if (aimKind === 'drop' && selectedDropId === null && dropTargets.length > 0) {
+      selectedDropId = dropTargets[0].id;
+    }
+    return { dropTargets, namedOrigins, aimKind, selectedDropId };
+  } catch {
+    return { dropTargets: [], namedOrigins: [], aimKind: 'hub', selectedDropId: null };
+  }
+}
 
 export type ViewTab =
   | 'dashboard'
@@ -135,6 +182,10 @@ function normalizeKnnPoints(value: unknown): KnnPoint[] {
             : typeof record.hood === 'number'
               ? record.hood
               : 0,
+        ...(() => {
+          const shootTarget = normalizeKnnShootTarget(record.shootTarget);
+          return shootTarget !== undefined ? { shootTarget } : {};
+        })(),
       };
     });
 }
@@ -149,6 +200,14 @@ function loadStoredKnnMap(): KnnPoint[] {
   } catch {
     return [];
   }
+}
+
+function getInitialKnnMapPoints(): KnnPoint[] {
+  const stored = loadStoredKnnMap();
+  if (stored.length > 0) {
+    return stored;
+  }
+  return normalizeKnnPoints(deployKnnMapJson as unknown);
 }
 
 function downloadJson(filename: string, data: unknown) {
@@ -243,7 +302,17 @@ function App() {
   const [viewTab, setViewTab] = useState<ViewTab>('dashboard');
   const [state, setState] = useState(() => createInitialRobotState('mock'));
   const robotDims = { lengthM: 0.9, widthM: 0.8 };
-  const [loggedPoints, setLoggedPoints] = useState<KnnPoint[]>(() => loadStoredKnnMap());
+  const [loggedPoints, setLoggedPoints] = useState<KnnPoint[]>(() => getInitialKnnMapPoints());
+  const [simDropTargets, setSimDropTargets] = useState<SimDropTarget[]>(
+    () => loadPersistedSimAim().dropTargets
+  );
+  const [simNamedOrigins, setSimNamedOrigins] = useState<SimNamedOrigin[]>(
+    () => loadPersistedSimAim().namedOrigins
+  );
+  const [simAimKind, setSimAimKind] = useState<SimAimKind>(() => loadPersistedSimAim().aimKind);
+  const [simSelectedDropId, setSimSelectedDropId] = useState<string | null>(
+    () => loadPersistedSimAim().selectedDropId
+  );
   const [knnDraftPoint, setKnnDraftPoint] = useState<KnnPoint>({
     x: 0,
     y: 0,
@@ -323,6 +392,124 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEY_SIM_AIM,
+        JSON.stringify({
+          dropTargets: simDropTargets,
+          namedOrigins: simNamedOrigins,
+          aimKind: simAimKind,
+          selectedDropId: simSelectedDropId,
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [simDropTargets, simNamedOrigins, simAimKind, simSelectedDropId]);
+
+  useEffect(() => {
+    if (simAimKind === 'drop' && simDropTargets.length === 0) {
+      setSimAimKind('hub');
+      setSimSelectedDropId(null);
+    }
+  }, [simAimKind, simDropTargets.length]);
+
+  useEffect(() => {
+    if (simAimKind !== 'drop' || simDropTargets.length === 0) {
+      return;
+    }
+    if (simSelectedDropId !== null && simDropTargets.some((d) => d.id === simSelectedDropId)) {
+      return;
+    }
+    setSimSelectedDropId(simDropTargets[0]?.id ?? null);
+  }, [simAimKind, simDropTargets, simSelectedDropId]);
+
+  const handleSimAddDropTarget = useCallback((x: number, y: number) => {
+    const id = newSimDropTargetId();
+    setSimDropTargets((prev) => [
+      ...prev,
+      {
+        id,
+        x,
+        y,
+        label: `Drop ${prev.length + 1}`,
+        alignmentOriginId: SIM_HUB_ORIGIN_ID,
+      },
+    ]);
+    setSimSelectedDropId(id);
+    setSimAimKind('drop');
+  }, []);
+
+  const handleSimAddNamedOrigin = useCallback((x: number, y: number) => {
+    const id = newSimNamedOriginId();
+    setSimNamedOrigins((prev) => [
+      ...prev,
+      { id, x, y, name: `Origin ${prev.length + 1}` },
+    ]);
+  }, []);
+
+  const handleSimRemoveNamedOrigin = useCallback((originId: string) => {
+    setSimNamedOrigins((prev) => prev.filter((o) => o.id !== originId));
+    setSimDropTargets((prev) =>
+      prev.map((d) =>
+        d.alignmentOriginId === originId ? { ...d, alignmentOriginId: SIM_HUB_ORIGIN_ID } : d
+      )
+    );
+  }, []);
+
+  const handleSimRenameNamedOrigin = useCallback((originId: string, name: string) => {
+    const trimmed = name.trim();
+    setSimNamedOrigins((prev) =>
+      prev.map((o) => (o.id === originId ? { ...o, name: trimmed.length > 0 ? trimmed : o.name } : o))
+    );
+  }, []);
+
+  const handleSimUpdateDropTarget = useCallback(
+    (
+      id: string,
+      patch: Partial<Pick<SimDropTarget, 'label' | 'alignmentOriginId' | 'x' | 'y'>>
+    ) => {
+      setSimDropTargets((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, ...patch } : d))
+      );
+    },
+    []
+  );
+
+  const handleSimRemoveDropTarget = useCallback((id: string) => {
+    setSimDropTargets((prev) => prev.filter((d) => d.id !== id));
+    setSimSelectedDropId((cur) => (cur === id ? null : cur));
+  }, []);
+
+  const handleSimSelectDropForAim = useCallback((id: string) => {
+    setSimSelectedDropId(id);
+    setSimAimKind('drop');
+  }, []);
+
+  const handleApplyMockShotFromSim = useCallback(
+    (headingDeg: number, shooterRpmSp: number, hoodDegSp: number) => {
+      if (mode !== 'mock') {
+        return;
+      }
+      setState((prev) =>
+        applyRobotStateUpdate(
+          prev,
+          {
+            swerve: { headingDeg },
+            shooter: {
+              rpmSetpoint: shooterRpmSp,
+              hoodSetpoint: hoodDegSp,
+              hoodDeg: hoodDegSp,
+            },
+          },
+          Date.now()
+        )
+      );
+    },
+    [mode]
+  );
+
   const loadKnnLog = (file: File | null) => {
     if (!file) return;
     const reader = new FileReader();
@@ -387,8 +574,28 @@ function App() {
   };
 
   const exportKnnMap = () => {
-    downloadJson('knn_map.json', loggedPoints);
+    const payload = loggedPoints.map((p) => ({
+      x: p.x,
+      y: p.y,
+      headingDeg: p.headingDeg ?? 0,
+      shooterRpm: p.shooterRpm ?? 0,
+      hoodDeg: p.hoodDeg ?? 0,
+      shootTarget: p.shootTarget ?? { kind: 'hub' as const },
+    }));
+    downloadJson('knn_map.json', payload);
   };
+
+  const handleSaveKnnShootTarget = useCallback((index: number, target: KnnShootTarget) => {
+    setLoggedPoints((prev) => {
+      const next = prev.map((p, i) => (i === index ? { ...p, shootTarget: target } : p));
+      try {
+        localStorage.setItem(STORAGE_KEY_KNN_MAP, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     setState((prev) => applyRobotStateUpdate(prev, { mode }, Date.now()));
@@ -761,9 +968,9 @@ function App() {
                   </button>
                 </div>
                 <div className="hint">
-                  Build the same `knn_map.json` format the robot reads from deploy, and keep it visible
-                  here as a field reference while you set up positions. Each point can also store shooter
-                  RPM and hood angle for later interpretation.
+                  Build the same <code>knn_map.json</code> format the robot reads from deploy (extra{' '}
+                  <code>shootTarget</code> keys are ignored on the robot). Each point defaults to aiming at
+                  the hub; in Simulation you can save a field shoot point per index and export it here.
                 </div>
               </div>
             </section>
@@ -822,6 +1029,29 @@ function App() {
           turretAngleDeg={state.turret.angleDeg}
           hoodPitchDeg={state.shooter.hoodPitchDeg}
           velocityMps={state.shooter.velocityMps}
+          shotMapPoints={loggedPoints}
+          knnSelectedIndex={state.knnSelectedIndex}
+          connected={state.connected}
+          swerveSpeedMps={state.swerve.speedMps}
+          shooterRpm={state.shooter.rpm}
+          shooterRpmSetpoint={state.shooter.rpmSetpoint}
+          hoodSetpointDeg={state.shooter.hoodSetpoint}
+          turretTracking={state.turret.tracking}
+          aimTargetKind={simAimKind}
+          dropTargets={simDropTargets}
+          namedOrigins={simNamedOrigins}
+          selectedDropTargetId={simSelectedDropId}
+          onAimTargetKindChange={setSimAimKind}
+          onAddDropTarget={handleSimAddDropTarget}
+          onAddNamedOrigin={handleSimAddNamedOrigin}
+          onRemoveNamedOrigin={handleSimRemoveNamedOrigin}
+          onRenameNamedOrigin={handleSimRenameNamedOrigin}
+          onUpdateDropTarget={handleSimUpdateDropTarget}
+          onRemoveDropTarget={handleSimRemoveDropTarget}
+          onSelectDropForAim={handleSimSelectDropForAim}
+          mockMode={mode === 'mock'}
+          onApplyMockShotFromSim={handleApplyMockShotFromSim}
+          onSaveKnnShootTarget={handleSaveKnnShootTarget}
         />
       )}
 

@@ -23,6 +23,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
+import frc.robot.DriveConstants;
 import frc.robot.ShooterConstants;
 
 /**
@@ -37,6 +38,7 @@ import frc.robot.ShooterConstants;
  *   <li>{@code interpolatedShooterRpm}, {@code interpolatedHoodDeg} — IDW blend from {@link KnnConstants#kIdwNearestCount}
  *       nearest points (same as nearest when only one point or at a sample pose)
  *   <li>{@code nearestHeadingDeg}, {@code interpolatedHeadingDeg} — saved vs circular IDW blend of logged {@code headingDeg}
+ *   <li>{@code nearestAimHeadingDeg} — field heading to score toward the nearest sample's {@code shootTarget} (hub or field point)
  * </ul>
  */
 public class KnnInterpreter {
@@ -53,6 +55,7 @@ public class KnnInterpreter {
     private final DoublePublisher interpolatedHoodPub;
     private final DoublePublisher nearestHeadingDegPub;
     private final DoublePublisher interpolatedHeadingDegPub;
+    private final DoublePublisher nearestAimHeadingDegPub;
 
     private int lastSelectedIndex = -1;
     private double lastNearestRpm = ShooterConstants.kLeftBumperShotRpm;
@@ -61,6 +64,8 @@ public class KnnInterpreter {
     private double lastInterpolatedHood = ShooterConstants.kLeftBumperShotHoodAngleDeg;
     private double lastNearestHeadingDeg = 0.0;
     private double lastInterpolatedHeadingDeg = 0.0;
+    /** Bearing to hold for KNN aim (hub or field target from nearest map row). */
+    private Rotation2d lastNearestAimRotation = Rotation2d.kZero;
 
     public KnnInterpreter() {
         table = NetworkTableInstance.getDefault().getTable("KNN");
@@ -72,6 +77,7 @@ public class KnnInterpreter {
         interpolatedHoodPub = table.getDoubleTopic("interpolatedHoodDeg").publish();
         nearestHeadingDegPub = table.getDoubleTopic("nearestHeadingDeg").publish();
         interpolatedHeadingDegPub = table.getDoubleTopic("interpolatedHeadingDeg").publish();
+        nearestAimHeadingDegPub = table.getDoubleTopic("nearestAimHeadingDeg").publish();
         loadMap();
         interpolateHoodEnabledPub.set(KnnConstants.kInterpolateHoodWhileDriving);
     }
@@ -115,12 +121,25 @@ public class KnnInterpreter {
                 double hood = node.has("hoodDeg")
                         ? node.get("hoodDeg").asDouble()
                         : ShooterConstants.kLeftBumperShotHoodAngleDeg;
+                KnnShootTarget shootTarget = parseShootTarget(node);
                 points.add(new KnnMapPoint(
-                        new Pose2d(x, y, Rotation2d.fromDegrees(headingDeg)), rpm, hood));
+                        new Pose2d(x, y, Rotation2d.fromDegrees(headingDeg)), rpm, hood, shootTarget));
             }
         } catch (Exception e) {
             // Map remains empty; robot can still run without KNN
         }
+    }
+
+    private static KnnShootTarget parseShootTarget(JsonNode mapRow) {
+        if (!mapRow.has("shootTarget") || !mapRow.get("shootTarget").isObject()) {
+            return new KnnShootTarget.Hub();
+        }
+        JsonNode st = mapRow.get("shootTarget");
+        String kind = st.has("kind") ? st.get("kind").asText("hub") : "hub";
+        if ("field".equals(kind) && st.has("x") && st.has("y")) {
+            return new KnnShootTarget.Field(st.get("x").asDouble(), st.get("y").asDouble());
+        }
+        return new KnnShootTarget.Hub();
     }
 
     private int findNearestIndex(Pose2d pose) {
@@ -203,6 +222,24 @@ public class KnnInterpreter {
         nearestHeadingDegPub.set(lastNearestHeadingDeg);
     }
 
+    private void updateNearestAimRotation(Pose2d robotPose, int nearestIndex) {
+        if (points.isEmpty()) {
+            lastNearestAimRotation = DriveConstants.rotationToFaceHub(robotPose);
+        } else if (nearestIndex >= 0 && nearestIndex < points.size()) {
+            KnnMapPoint p = points.get(nearestIndex);
+            KnnShootTarget st = p.getShootTarget();
+            if (st instanceof KnnShootTarget.Field f) {
+                lastNearestAimRotation =
+                        DriveConstants.rotationToFaceFieldPoint(robotPose, f.x(), f.y());
+            } else {
+                lastNearestAimRotation = DriveConstants.rotationToFaceHub(robotPose);
+            }
+        } else {
+            lastNearestAimRotation = DriveConstants.rotationToFaceHub(robotPose);
+        }
+        nearestAimHeadingDegPub.set(lastNearestAimRotation.getDegrees());
+    }
+
     /**
      * Updates nearest-index tracking, nearest-point shooter fields, and IDW interpolation for the
      * current pose. Call once per loop with the fused field pose.
@@ -211,6 +248,7 @@ public class KnnInterpreter {
         interpolateHoodEnabledPub.set(KnnConstants.kInterpolateHoodWhileDriving);
         int best = findNearestIndex(pose);
         publishSelection(best);
+        updateNearestAimRotation(pose, best);
         computeInterpolated(pose);
         interpolatedRpmPub.set(lastInterpolatedRpm);
         interpolatedHoodPub.set(lastInterpolatedHood);
@@ -220,6 +258,14 @@ public class KnnInterpreter {
     /** Nearest map point's saved field heading (deg), same as pose rotation in {@code knn_map.json}. */
     public Rotation2d getNearestHeadingRotation() {
         return Rotation2d.fromDegrees(lastNearestHeadingDeg);
+    }
+
+    /**
+     * Heading to face the scoring target for the nearest KNN sample: hub, or {@code shootTarget} field
+     * point (bearing from the <em>current</em> robot pose). Updated in {@link #update(Pose2d)}.
+     */
+    public Rotation2d getNearestAimRotation() {
+        return lastNearestAimRotation;
     }
 
     /**
@@ -259,6 +305,7 @@ public class KnnInterpreter {
     public Optional<Pose2d> getNearestPose(Pose2d pose) {
         int best = findNearestIndex(pose);
         publishSelection(best);
+        updateNearestAimRotation(pose, best);
         computeInterpolated(pose);
         interpolatedRpmPub.set(lastInterpolatedRpm);
         interpolatedHoodPub.set(lastInterpolatedHood);
@@ -270,6 +317,7 @@ public class KnnInterpreter {
     public Optional<KnnMapPoint> getNearestMapPoint(Pose2d pose) {
         int best = findNearestIndex(pose);
         publishSelection(best);
+        updateNearestAimRotation(pose, best);
         computeInterpolated(pose);
         interpolatedRpmPub.set(lastInterpolatedRpm);
         interpolatedHoodPub.set(lastInterpolatedHood);

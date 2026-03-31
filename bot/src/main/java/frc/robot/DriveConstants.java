@@ -93,23 +93,32 @@ public final class DriveConstants {
     public static final double kHubFieldYMeters = 4.0;
 
     /**
-     * Extra rotation added to the bearing toward the hub. Default {@code 180}° so the <em>back</em> of the
-     * robot (typical shooter side) faces the hub; use {@code 0} if your shooter aligns with robot +X.
+     * Extra rotation added to the bearing toward the hub. Use {@code 0} when the scorer aligns with robot +X;
+     * use {@code 180} if the shooter is on the back and should face the hub.
      */
-    public static final double kHubFacingBearingOffsetDegrees = 180.0;
+    public static final double kHubFacingBearingOffsetDegrees = 0.0;
 
     /**
      * Heading to hold so the scoring side faces the hub (field frame), from fused pose.
      * Bearing is toward hub plus {@link #kHubFacingBearingOffsetDegrees}.
      */
     public static Rotation2d rotationToFaceHub(Pose2d robotPose) {
-        double dx = kHubFieldXMeters - robotPose.getX();
-        double dy = kHubFieldYMeters - robotPose.getY();
+        return rotationToFaceFieldPoint(robotPose, kHubFieldXMeters, kHubFieldYMeters);
+    }
+
+    /**
+     * Heading so the scoring side faces a field point (same convention as {@link #rotationToFaceHub} —
+     * bearing toward the target plus {@link #kHubFacingBearingOffsetDegrees}).
+     */
+    public static Rotation2d rotationToFaceFieldPoint(
+            Pose2d robotPose, double targetXMeters, double targetYMeters) {
+        double dx = targetXMeters - robotPose.getX();
+        double dy = targetYMeters - robotPose.getY();
         if (dx * dx + dy * dy < 1e-8) {
             return robotPose.getRotation();
         }
-        Rotation2d towardHub = Rotation2d.fromRadians(Math.atan2(dy, dx));
-        return towardHub.plus(Rotation2d.fromDegrees(kHubFacingBearingOffsetDegrees));
+        Rotation2d toward = Rotation2d.fromRadians(Math.atan2(dy, dx));
+        return toward.plus(Rotation2d.fromDegrees(kHubFacingBearingOffsetDegrees));
     }
 
     /** Heading PID for {@link com.ctre.phoenix6.swerve.SwerveRequest.FieldCentricFacingAngle} while shooting. */

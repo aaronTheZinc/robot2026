@@ -64,6 +64,20 @@ public class RobotContainer {
     private final SwerveRequest.FieldCentric drive = new SwerveRequest.FieldCentric()
             .withDeadband(MaxSpeed * 0.1).withRotationalDeadband(MaxAngularRate * 0.1) // Add a 10% deadband
             .withDriveRequestType(DriveRequestType.OpenLoopVoltage); // Use open-loop control for drive motors
+    /**
+     * While holding KNN shot (operator A): face {@link KnnInterpreter#getNearestAimRotation()} from nearest map
+     * sample's {@code shootTarget}, with driver translation on joystick 0.
+     */
+    private final SwerveRequest.FieldCentricFacingAngle knnAimFacing =
+            new SwerveRequest.FieldCentricFacingAngle()
+                    .withHeadingPID(
+                            DriveConstants.kHubFacingHeadingKp,
+                            DriveConstants.kHubFacingHeadingKi,
+                            DriveConstants.kHubFacingHeadingKd)
+                    .withDeadband(DriveConstants.kHubFacingDeadbandMps)
+                    .withRotationalDeadband(DriveConstants.kHubFacingRotationalDeadbandRad)
+                    .withMaxAbsRotationalRate(DriveConstants.kHubFacingMaxAngularRateRadPerSec)
+                    .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
     private final SwerveRequest.SwerveDriveBrake brake = new SwerveRequest.SwerveDriveBrake();
     private final SwerveRequest.PointWheelsAt point = new SwerveRequest.PointWheelsAt();
     private final SwerveRequest.RobotCentric forwardStraight = new SwerveRequest.RobotCentric()
@@ -257,11 +271,24 @@ public class RobotContainer {
                         DriverStation.reportWarning("KNN: knn_map.json missing or has no points", false);
                         return Commands.none();
                     }
-                    return getKnnMapHeldShotSequenceCommand(
-                                    knnInterpreter.getInterpolatedHoodDeg(), knnInterpreter.getInterpolatedRpm())
-                            .withName("KNN held shot (inferred)");
+                    Command shot =
+                            getKnnMapHeldShotSequenceCommand(
+                                            knnInterpreter.getInterpolatedHoodDeg(),
+                                            knnInterpreter.getInterpolatedRpm())
+                                    .withName("KNN held shot (inferred)");
+                    Command faceAim =
+                            drivetrain.applyRequest(
+                                    () -> {
+                                        knnInterpreter.update(drivetrain.getState().Pose);
+                                        return knnAimFacing
+                                                .withVelocityX(-joystick.getLeftY() * MaxSpeed)
+                                                .withVelocityY(-joystick.getLeftX() * MaxSpeed)
+                                                .withTargetDirection(
+                                                        knnInterpreter.getNearestAimRotation());
+                                    });
+                    return Commands.parallel(shot, faceAim).withName("KNN held shot + aim");
                 },
-                Set.of(shooter, intake));
+                Set.of(shooter, intake, drivetrain));
     }
 
     private Pose2d getDriveAssistTargetPose() {

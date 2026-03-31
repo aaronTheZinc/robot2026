@@ -11,11 +11,13 @@ public final class KnnMapPoint {
     private final Pose2d pose;
     private final double shooterRpm;
     private final double hoodDeg;
+    private final KnnShootTarget shootTarget;
 
-    public KnnMapPoint(Pose2d pose, double shooterRpm, double hoodDeg) {
+    public KnnMapPoint(Pose2d pose, double shooterRpm, double hoodDeg, KnnShootTarget shootTarget) {
         this.pose = pose;
         this.shooterRpm = shooterRpm;
         this.hoodDeg = hoodDeg;
+        this.shootTarget = shootTarget;
     }
 
     public Pose2d pose() {
@@ -28,5 +30,10 @@ public final class KnnMapPoint {
 
     public double getHoodDeg() {
         return hoodDeg;
+    }
+
+    /** Aim for this sample: hub (default) or a field point from {@code knn_map.json}. */
+    public KnnShootTarget getShootTarget() {
+        return shootTarget;
     }
 }
