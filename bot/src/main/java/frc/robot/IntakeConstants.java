@@ -10,11 +10,22 @@ public final class IntakeConstants {
 
     /** CAN ID for the pivot Spark MAX (up/down). */
     public static final int kPivotId = 33;
+    /** SPARK MAX smart current limit (A) for the pivot. Tune with mechanism load / breaker budget. */
+    public static final int kPivotSmartCurrentLimitAmps = 20;
     /** CAN ID for the roller Spark MAX (in/out). */
     public static final int kRollerId = 31;
     /** CAN IDs for the two hopper Spark MAXs (run together for feed / spit). */
     public static final int kHopperMotorACanId = 55;
     public static final int kHopperMotorBCanId = 60;
+
+    /**
+     * Hopper A SPARK MAX: invert motor direction in firmware so it opposes B for the same signed duty.
+     * If motor A does not turn while B does, try flipping this after confirming CAN IDs on the bus.
+     */
+    public static final boolean kHopperMotorAInverted = true;
+
+    /** Smart current limit (A) for each hopper SPARK MAX. */
+    public static final int kHopperSmartCurrentLimitAmps = 40;
 
     /** Pivot position (motor rotations) for stow (retracted). */
     public static final double kPivotStowRotations = 0.0;
@@ -40,13 +51,15 @@ public final class IntakeConstants {
     public static final double kRollerOuttakeSpeed = -0.8;
 
     /** Hopper speed [-1, 1] when feeding the shooter. */
-    public static final double kHopperFeedSpeed = -0.5;
+    public static final double kHopperFeedSpeed = -0.8;
     /** Hopper speed [-1, 1] when spitting out (reverse feed). */
-    public static final double kHopperSpitOutSpeed = 0.5;
+    public static final double kHopperSpitOutSpeed = 0.8;
 
     // ----- Pivot stop-based control (mechanical stops, no encoder setpoints) -----
     /** Normalized speed [-1, 1] for homing toward stow (init / Y+B); keep slow for safety. */
     public static final double kPivotHomingSpeed = 0.2;
+    /** Normalized speed [-1, 1] for homing toward collect (down) until stall; keep slow for safety. */
+    public static final double kPivotCollectHomingSpeed = 0.2;
     /** Normalized speed [-1, 1] for pivot moving toward stow (up). */
     public static final double kPivotStowSpeed = -0.2;
     /** Normalized speed [-1, 1] for pivot moving toward collect (down). */
@@ -57,6 +70,16 @@ public final class IntakeConstants {
     public static final int kPivotStallConfirmCycles = 5;
     /** Max time (s) for stow or collect command; safety timeout if stall never triggers. */
     public static final double kPivotStallTimeoutSeconds = 5.0;
+
+    /**
+     * Pivot relative position (motor rotations) that counts as "down" for dashboard / logic.
+     */
+    public static final double kPivotDownPositionRotations = 42.0;
+    /** Within ±this many rotations of {@link #kPivotDownPositionRotations}, intake is considered at down. */
+    public static final double kPivotDownPositionToleranceRotations = 5.0;
+
+    /** How often {@link frc.robot.subsystems.IntakeSubsystem} pushes intake fields to SmartDashboard (s). */
+    public static final double kIntakeDashboardPublishPeriodSeconds = 1.0;
 
     // ----- Motor test (all test speeds and inversion for intake motors in this file) -----
 

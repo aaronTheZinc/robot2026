@@ -23,21 +23,31 @@ public final class ShooterConstants {
 
     /** Optional soft limit: minimum hood angle in degrees (e.g. 0). */
     public static final double kHoodMinAngleDeg = 0;
+
     /** Optional soft limit: maximum hood angle in degrees (e.g. 90). */
     public static final double kHoodMaxAngleDeg = 90;
 
-    /** Hood position PID gains (slot 0). Tune for your mechanism. */
-    public static final double kHoodKp = 2.0;
+    /**
+     * Hood position PID on the Talon (slot 0, Phoenix PositionVoltage). Native units: kP V/revolution,
+     * kI V/(rev·s), kD V/(rev/s). Keep kP small for gentle moves.
+     */
+    public static final double kHoodKp = 4.0;
     public static final double kHoodKi = 0.0;
-    public static final double kHoodKd = 0.1;
-    /** Open-loop hood hold/move gain in volts per degree of angle error. */
-    public static final double kHoodAngleErrorVoltsPerDeg = 0.2;
-    /** Minimum voltage magnitude to overcome hood stiction when moving toward a setpoint. */
-    public static final double kHoodAngleControlMinVoltageVolts = 0.4;
-    /** Maximum voltage magnitude when driving hood from angle error. */
+    public static final double kHoodKd = 0.05;
+    /** Peak closed-loop output magnitude for hood position (matches former P-loop cap). */
     public static final double kHoodAngleControlMaxVoltageVolts = 6.0;
-    /** Angle error deadband where hood voltage control stops driving. */
+    /** Angle error deadband where hood stops driving (coast at 0 V). */
     public static final double kHoodAngleToleranceDeg = 0.5;
+    /**
+     * Smoothing for hood setpoint from dashboard slider / NetworkTables (0–1 per loop, higher = faster
+     * tracking). Ignores single-cycle noise; shot profiles still take effect when that path is active.
+     */
+    public static final double kHoodDashboardSetpointSmoothingAlpha = 0.2;
+    /**
+     * If dashboard hood target jumps by more than this (deg), snap the filter to the target (large
+     * moves stay responsive; small noise still smooths).
+     */
+    public static final double kHoodDashboardSetpointSnapThresholdDeg = 22.0;
 
     /**
      * Homing (real robot only): run hood toward the zero/mechanical-stop position until stall.
@@ -85,6 +95,8 @@ public final class ShooterConstants {
 
     /** Dashboard: hood angle step in degrees for increment/decrement buttons. */
     public static final double kHoodDegreesIncrement = 5.0;
+    /** Delay between POV up/down steps while held (subsystem controller D-pad). */
+    public static final double kHoodPovRepeatDelaySeconds = 0.12;
     /** Dashboard: shooter RPM step for increment/decrement buttons. */
     public static final double kShooterRpmIncrement = 100.0;
 

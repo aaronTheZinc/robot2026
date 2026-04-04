@@ -12,6 +12,7 @@ import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.config.SparkBaseConfig;
 import com.revrobotics.spark.config.SparkMaxConfig;
 
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.IntakeConstants;
@@ -41,25 +42,55 @@ public class IntakeSubsystem extends SubsystemBase {
     /** After stall-based travel: true = at stow (up), false = at collect (down), null = unknown. */
     private Boolean pivotStowed = null;
 
+    /** Last FPGA time we published to SmartDashboard; negative so the first loop always publishes. */
+    private double lastDashboardPublishSec = -1.0;
+
     public IntakeSubsystem() {
         var pivotConfig = new SparkMaxConfig()
-                .idleMode(SparkBaseConfig.IdleMode.kBrake);
+                .smartCurrentLimit(IntakeConstants.kPivotSmartCurrentLimitAmps)
+                .idleMode(SparkBaseConfig.IdleMode.kCoast);
         pivotMotor.configure(pivotConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
 
         var rollerConfig = new SparkMaxConfig()
                 .idleMode(SparkBaseConfig.IdleMode.kBrake);
         rollerMotor.configure(rollerConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
 
-        var hopperConfig = new SparkMaxConfig()
-                .idleMode(SparkBaseConfig.IdleMode.kBrake);
-        hopperMotorA.configure(hopperConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
-        hopperMotorB.configure(hopperConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+        var hopperBase =
+                new SparkMaxConfig()
+                        .idleMode(SparkBaseConfig.IdleMode.kBrake)
+                        .smartCurrentLimit(IntakeConstants.kHopperSmartCurrentLimitAmps)
+                        // Clear stale follower mode from REV Hardware Client so open-loop .set() drives this motor.
+                        .disableFollowerMode();
+        var hopperConfigA =
+                new SparkMaxConfig()
+                        .apply(hopperBase)
+                        .inverted(IntakeConstants.kHopperMotorAInverted);
+        var hopperConfigB = new SparkMaxConfig().apply(hopperBase).inverted(false);
+        hopperMotorA.configure(hopperConfigA, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+        hopperMotorB.configure(hopperConfigB, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
     }
 
     @Override
     public void periodic() {
-        SmartDashboard.putNumber("Intake/PivotRotations", getPivotRotations());
+        double now = Timer.getFPGATimestamp();
+        if (now - lastDashboardPublishSec < IntakeConstants.kIntakeDashboardPublishPeriodSeconds) {
+            return;
+        }
+        lastDashboardPublishSec = now;
+
+        double pivotRelRot = getPivotRotations();
+        SmartDashboard.putNumber("Intake/Pivot Relative Position (rot)", pivotRelRot);
+        SmartDashboard.putNumber("Intake/Pivot Down Threshold (rot)", IntakeConstants.kPivotDownPositionRotations);
+        SmartDashboard.putNumber(
+                "Intake/Pivot Down Tolerance (rot)", IntakeConstants.kPivotDownPositionToleranceRotations);
+        SmartDashboard.putBoolean("Intake/Pivot At Down", isPivotAtDownPosition());
         SmartDashboard.putBoolean("Intake/PivotReady", pivotReady);
+        SmartDashboard.putNumber("Intake/RollerCurrentAmps", rollerMotor.getOutputCurrent());
+        SmartDashboard.putNumber("Intake/RollerBusVoltage", rollerMotor.getBusVoltage());
+        SmartDashboard.putNumber("Intake/HopperAAppliedDuty", hopperMotorA.getAppliedOutput());
+        SmartDashboard.putNumber("Intake/HopperBAppliedDuty", hopperMotorB.getAppliedOutput());
+        SmartDashboard.putNumber("Intake/HopperACurrentAmps", hopperMotorA.getOutputCurrent());
+        SmartDashboard.putNumber("Intake/HopperBCurrentAmps", hopperMotorB.getOutputCurrent());
     }
 
     // ----- Pivot (up/down) — mechanical stops, no encoder setpoints -----
@@ -77,7 +108,7 @@ public class IntakeSubsystem extends SubsystemBase {
         }
     }
 
-    /** Zero the pivot encoder (call when at stow mechanical stop after homing). */
+    /** Zero the pivot encoder (call when at a mechanical stop after the matching homing command). */
     public void zeroPivotPosition() {
         pivotEncoder.setPosition(0);
     }
@@ -85,6 +116,11 @@ public class IntakeSubsystem extends SubsystemBase {
     /** Run pivot slowly toward stow for homing (init / Y+B). */
     public void setPivotTowardStowHoming() {
         pivotMotor.set(IntakeConstants.kPivotHomingSpeed);
+    }
+
+    /** Run pivot slowly toward collect (down) for homing until stall (encoder zero = deployed). */
+    public void setPivotTowardCollectHoming() {
+        pivotMotor.set(IntakeConstants.kPivotCollectHomingSpeed);
     }
 
     /** Run pivot toward stow (up) at normal travel speed. */
@@ -106,6 +142,15 @@ public class IntakeSubsystem extends SubsystemBase {
     /** Get current pivot position in motor rotations (for telemetry; position control is stop-based). */
     public double getPivotRotations() {
         return pivotEncoder.getPosition();
+    }  
+
+    /**
+     * True when relative pivot position is within ±{@link IntakeConstants#kPivotDownPositionToleranceRotations}
+     * of {@link IntakeConstants#kPivotDownPositionRotations}.
+     */
+    public boolean isPivotAtDownPosition() {
+        return getPivotRotations() > IntakeConstants.kPivotDownPositionRotations;
+        
     }
 
     // ----- Roller (in/out) -----
@@ -162,7 +207,7 @@ public class IntakeSubsystem extends SubsystemBase {
     // ----- Hopper (feed to shooter) — two SPARK MAXs, same duty -----
 
     private void setHopperMotors(double duty) {
-        hopperMotorA.set(-1 *duty);
+        hopperMotorA.set(duty);
         hopperMotorB.set(duty);
     }
 

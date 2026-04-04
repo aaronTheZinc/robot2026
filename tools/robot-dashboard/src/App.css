@@ -706,6 +706,17 @@
   min-width: 36px;
 }
 
+/* Panel is pointer-events: none so the canvas receives drags; re-enable for the checkbox. */
+.simulation-vector-checkbox-row {
+  pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
+}
+
+.simulation-vector-checkbox-row input {
+  cursor: pointer;
+}
+
 .turret-nav-hint {
   margin: 0;
   font-size: 0.75rem;
@@ -1356,6 +1367,15 @@
   overflow: hidden;
   gap: 2px;
   padding: 2px;
+}
+
+/* WPIBlue: field y = 0 along bottom edge (PathPlanner-style); (0,0) bottom-left */
+.knn-spatial-grid--wpilib-blue-origin {
+  transform: scaleY(-1);
+}
+
+.knn-spatial-grid--wpilib-blue-origin .knn-cell {
+  transform: scaleY(-1);
 }
 
 .knn-cell {

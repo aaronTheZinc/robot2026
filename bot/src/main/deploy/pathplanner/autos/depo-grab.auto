@@ -1,0 +1,56 @@
+{
+  "version": "2025.0",
+  "command": {
+    "type": "sequential",
+    "data": {
+      "commands": [
+        {
+          "type": "parallel",
+          "data": {
+            "commands": [
+              {
+                "type": "path",
+                "data": {
+                  "pathName": "depo"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "Point and Shoot Depo"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "Heading 0"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "back-into-depo"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "Intake 6s"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "Point and Shoot Depo"
+          }
+        }
+      ]
+    }
+  },
+  "resetOdom": true,
+  "folder": null,
+  "choreoAuto": false
+}

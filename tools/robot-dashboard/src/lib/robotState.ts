@@ -52,7 +52,7 @@ export type RobotState = {
     y: number;
     headingDeg: number;
   };
-  /** Hub aim debug: XY from odometry; heading from hub-facing calc (NT Pose/idealShooterPose) */
+  /** Hub aim debug: XY from odometry; heading = shot-map hub facing (NT Pose/idealShooterPose) */
   idealShooterPose: {
     x: number;
     y: number;

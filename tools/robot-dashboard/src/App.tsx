@@ -37,6 +37,10 @@ import {
   type KnnShootTarget,
 } from './lib/knnInference';
 import {
+  mirrorKnnPoints,
+  type MirrorFilter,
+} from './lib/knnFieldMirror';
+import {
   newSimDropTargetId,
   normalizeSimDropTargets,
   type SimDropTarget,
@@ -320,6 +324,7 @@ function App() {
     shooterRpm: 0,
     hoodDeg: 0,
   });
+  const [knnMirrorFilter, setKnnMirrorFilter] = useState<MirrorFilter>('yLow');
   const [shooterCurrentHistory, setShooterCurrentHistory] = useState<CurrentHistory>({
     hood: [0],
     left: [0],
@@ -378,6 +383,11 @@ function App() {
     const date = new Date(state.lastUpdateMs);
     return date.toLocaleTimeString();
   }, [state.lastUpdateMs]);
+
+  const knnMirroredCount = useMemo(
+    () => mirrorKnnPoints(loggedPoints, FIELD_WIDTH_M, knnMirrorFilter).length,
+    [loggedPoints, knnMirrorFilter]
+  );
 
   const applyUpdate = (update: RobotStateUpdate) => {
     setState((prev) => applyRobotStateUpdate(prev, update, Date.now()));
@@ -573,8 +583,8 @@ function App() {
     });
   };
 
-  const exportKnnMap = () => {
-    const payload = loggedPoints.map((p) => ({
+  const knnPointsToExportRows = (points: KnnPoint[]) =>
+    points.map((p) => ({
       x: p.x,
       y: p.y,
       headingDeg: p.headingDeg ?? 0,
@@ -582,7 +592,28 @@ function App() {
       hoodDeg: p.hoodDeg ?? 0,
       shootTarget: p.shootTarget ?? { kind: 'hub' as const },
     }));
-    downloadJson('knn_map.json', payload);
+
+  const exportKnnMap = () => {
+    downloadJson('knn_map.json', knnPointsToExportRows(loggedPoints));
+  };
+
+  const appendMirroredKnnPoints = () => {
+    const mirrored = mirrorKnnPoints(loggedPoints, FIELD_WIDTH_M, knnMirrorFilter);
+    if (mirrored.length === 0) {
+      return;
+    }
+    persistKnnMap([...loggedPoints, ...mirrored]);
+  };
+
+  const copyMirroredKnnJson = () => {
+    const mirrored = mirrorKnnPoints(loggedPoints, FIELD_WIDTH_M, knnMirrorFilter);
+    if (mirrored.length === 0) {
+      return;
+    }
+    const text = JSON.stringify(knnPointsToExportRows(mirrored), null, 2);
+    void navigator.clipboard.writeText(text).catch(() => {
+      /* ignore */
+    });
   };
 
   const handleSaveKnnShootTarget = useCallback((index: number, target: KnnShootTarget) => {
@@ -907,6 +938,41 @@ function App() {
                   <button type="button" onClick={clearKnnPoints} disabled={loggedPoints.length === 0}>
                     Clear map
                   </button>
+                </div>
+                <div className="control-row">
+                  <label>Mirror to other width side</label>
+                  <select
+                    value={knnMirrorFilter}
+                    onChange={(e) => setKnnMirrorFilter(e.target.value as MirrorFilter)}
+                    aria-label="Which points to mirror"
+                  >
+                    <option value="yLow">Only y &lt; {formatNumber(FIELD_WIDTH_M / 2, 2)} m (one side)</option>
+                    <option value="yHigh">Only y &gt; {formatNumber(FIELD_WIDTH_M / 2, 2)} m (other side)</option>
+                    <option value="all">All points (doubles map)</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={appendMirroredKnnPoints}
+                    disabled={loggedPoints.length === 0 || knnMirroredCount === 0}
+                    title={`Append ${knnMirroredCount} mirrored sample(s) to the map`}
+                  >
+                    Append mirrored
+                  </button>
+                  <button
+                    type="button"
+                    onClick={copyMirroredKnnJson}
+                    disabled={loggedPoints.length === 0 || knnMirroredCount === 0}
+                    title="Copy mirrored JSON only (clipboard); paste into knn_map.json"
+                  >
+                    Copy mirrored JSON
+                  </button>
+                </div>
+                <div className="hint">
+                  Mirror across field width midline (y = W/2, W = {formatNumber(FIELD_WIDTH_M, 2)} m):{' '}
+                  <code>x&apos; = x</code>, <code>y&apos; = W − y</code>,{' '}
+                  <code>headingDeg&apos; = wrap180(−headingDeg)</code>; RPM and hood unchanged;{' '}
+                  <code>shootTarget</code> field aim <code>(fx, fy)</code> → <code>(fx, W − fy)</code>;{' '}
+                  <code>hub</code> unchanged.
                 </div>
                 <div className="control-row">
                   <label>Manual point</label>

@@ -11,6 +11,11 @@ import {
   distanceBetweenFieldPointsM,
   HUB_FIELD_X_M,
   HUB_FIELD_Y_M,
+  HUB_FACING_OFFSET_DEG,
+  HUB_SHOT_MAP_MIN_DIST_SQ_M2,
+  hubShotMapHeadingOffsetRad,
+  hubShotMapHeadingTowardHubDeg,
+  normalizeHeadingDeg,
   optimalHeadingTowardFieldPointDeg,
   shortestAngleDeltaDeg,
 } from '../lib/hubField';
@@ -153,6 +158,8 @@ export default function SimulationView({
   type PlaceFieldMode = 'none' | 'drop' | 'origin';
   const [clickedShotIndex, setClickedShotIndex] = useState<number | null>(null);
   const [placeFieldMode, setPlaceFieldMode] = useState<PlaceFieldMode>('none');
+  /** Second arrow on each KNN marker: {@code rotationToFaceHubFromShotMap} heading (linear fit). */
+  const [showShotMapHubHeading, setShowShotMapHubHeading] = useState(false);
   const setClickedShotIndexRef = useRef(setClickedShotIndex);
   setClickedShotIndexRef.current = setClickedShotIndex;
 
@@ -195,7 +202,8 @@ export default function SimulationView({
   const hubVfxRef = useRef<THREE.Group | null>(null);
   const animationRef = useRef<number | null>(null);
 
-  const sphericalRef = useRef({ theta: 0.6, phi: 1.0, radius: 14 });
+  /** Default orbit: look from blue alliance (field x≈0) toward +X / red; matches WPIBlue (0,0) corner. */
+  const sphericalRef = useRef({ theta: -Math.PI / 2 + 0.2, phi: 0.92, radius: 14 });
   const panOffsetRef = useRef(new THREE.Vector3(0, 0, 0));
   const isDraggingRef = useRef(false);
   const pointerDownOnCanvasRef = useRef(false);
@@ -790,7 +798,7 @@ export default function SimulationView({
       vectorGroup.position.set(
         worldX + VECTOR_OFFSET * Math.cos(hRad),
         0.5,
-        worldZ + VECTOR_OFFSET * Math.sin(hRad)
+        worldZ - VECTOR_OFFSET * Math.sin(hRad)
       );
       vectorGroup.rotation.y = hRad;
     }
@@ -912,6 +920,29 @@ export default function SimulationView({
       );
       markerRoot.add(arrow);
 
+      if (showShotMapHubHeading) {
+        // DriveConstants.rotationToFaceHubFromShotMap: atan2(dy,dx) + hubShotMapHeadingOffsetRad(dx,dy)
+        const hdx = HUB_FIELD_X_M - px;
+        const hdy = HUB_FIELD_Y_M - py;
+        const mapFitDeg =
+          hdx * hdx + hdy * hdy < HUB_SHOT_MAP_MIN_DIST_SQ_M2
+            ? 0
+            : normalizeHeadingDeg(
+                (Math.atan2(hdy, hdx) + hubShotMapHeadingOffsetRad(hdx, hdy)) * (180 / Math.PI) +
+                  HUB_FACING_OFFSET_DEG
+              );
+        const dirMap = fieldHeadingDegToSceneForwardXZ(mapFitDeg);
+        const arrowMap = new THREE.ArrowHelper(
+          dirMap,
+          new THREE.Vector3(0, 0.22 + lift, 0),
+          0.48,
+          0xc4b5fd,
+          0.1,
+          0.065
+        );
+        markerRoot.add(arrowMap);
+      }
+
       group.add(markerRoot);
     }
 
@@ -931,6 +962,7 @@ export default function SimulationView({
     fieldWidthM,
     knnSelectedIndex,
     shotMapPoints,
+    showShotMapHubHeading,
   ]);
 
   useEffect(() => {
@@ -1247,12 +1279,7 @@ export default function SimulationView({
             effectiveAimFieldTarget.y
           )
         : aimTargetKind === 'hub'
-          ? optimalHeadingTowardFieldPointDeg(
-              aimFromX,
-              aimFromY,
-              HUB_FIELD_X_M,
-              HUB_FIELD_Y_M
-            )
+          ? hubShotMapHeadingTowardHubDeg(aimFromX, aimFromY)
           : selectedDropForAim && alignmentOriginResolved
             ? optimalHeadingTowardFieldPointDeg(
                 alignmentOriginResolved.x,
@@ -1321,9 +1348,9 @@ export default function SimulationView({
     <section className="simulation-view" ref={simulationSectionRef}>
       <div className="simulation-canvas" ref={containerRef} />
       <p className="simulation-nav-hint" aria-hidden="true">
-        WASD — pan · Q/E — up/down · Mouse — orbit · Wheel — zoom · Hex funnel — hub · Click KNN shot —
-        aim line · Violet — named alignment origins · Cyan — aim points (drops) · Teal — map · Gold —
-        selected shot · Pink — NT nearest
+        WASD — pan · Q/E — up/down · Mouse — orbit · Wheel — zoom · Hex funnel — hub ·         Click KNN shot —
+        aim line · Violet pillar — named alignment origins · Cyan — aim points (drops) · Teal — map · Gold —
+        selected shot · Pink — NT nearest · Optional lavender arrow — map-fit hub heading (checkbox)
       </p>
       <div
         className="simulation-vectors-panel"
@@ -1397,6 +1424,19 @@ export default function SimulationView({
             {knnSelectedIndex >= 0 ? ` · #${knnSelectedIndex}` : ''}
           </span>
         </div>
+        <label className="simulation-vector-row simulation-vector-checkbox-row">
+          <input
+            type="checkbox"
+            checked={showShotMapHubHeading}
+            onChange={(e) => setShowShotMapHubHeading(e.target.checked)}
+          />
+          <span className="simulation-vector-label">Map-fit hub heading</span>
+          <span
+            className="simulation-vector-swatch"
+            style={{ background: '#c4b5fd' }}
+            title="Violet arrow: DriveConstants.rotationToFaceHubFromShotMap (linear fit)"
+          />
+        </label>
       </div>
       <div className="simulation-overlay" aria-hidden="true">
         <span className="simulation-badge">Simulation</span>
@@ -1629,8 +1669,8 @@ export default function SimulationView({
                   </>
                 ) : aimTargetKind === 'hub' ? (
                   <>
-                    Bearing from the <strong>sample pose</strong> toward <strong>Hub</strong> (same
-                    convention as <code>DriveConstants.rotationToFaceHub</code>).
+                    Hub optimal heading uses <code>DriveConstants.rotationToFaceHubFromShotMap</code>{' '}
+                    (same linear offset constants as the robot).
                   </>
                 ) : (
                   <>
@@ -1649,7 +1689,13 @@ export default function SimulationView({
                 <dt>Distance to target</dt>
                 <dd>{aimDistanceM !== null ? `${aimDistanceM.toFixed(2)} m` : '—'}</dd>
                 <dt>Optimal heading</dt>
-                <dd title="Chassis +X toward selected aim point (same convention as hub helper)">
+                <dd
+                  title={
+                    aimTargetKind === 'hub'
+                      ? 'DriveConstants.rotationToFaceHubFromShotMap at sample pose'
+                      : 'Chassis +X along alignment ray toward selected aim'
+                  }
+                >
                   {optimalAimHeadingDeg!.toFixed(1)}°
                 </dd>
                 <dt>Logged heading</dt>

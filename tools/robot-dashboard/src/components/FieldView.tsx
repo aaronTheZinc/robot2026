@@ -1,6 +1,11 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 
+import {
+  fieldHeadingDegToSceneYawRad,
+  fieldPoseToWorldXZ,
+} from '../lib/simFieldToThree';
+
 type FieldViewProps = {
   fieldLengthM: number;
   fieldWidthM: number;
@@ -61,7 +66,7 @@ export default function FieldView({
       0.1,
       100
     );
-    camera.position.set(0, 12, 14);
+    camera.position.set(-14, 12, 3.5);
     camera.lookAt(0, 0, 0);
 
     const ambient = new THREE.AmbientLight(0xffffff, 0.7);
@@ -183,11 +188,15 @@ export default function FieldView({
     if (!robot) {
       return;
     }
-    const clampedX = THREE.MathUtils.clamp(poseX, 0, fieldLengthM);
-    const clampedY = THREE.MathUtils.clamp(poseY, 0, fieldWidthM);
-    robot.position.x = clampedX - fieldLengthM / 2;
-    robot.position.z = clampedY - fieldWidthM / 2;
-    robot.rotation.y = THREE.MathUtils.degToRad(headingDeg);
+    const { wx, wz } = fieldPoseToWorldXZ(
+      poseX,
+      poseY,
+      fieldLengthM,
+      fieldWidthM
+    );
+    robot.position.x = wx;
+    robot.position.z = wz;
+    robot.rotation.y = fieldHeadingDegToSceneYawRad(headingDeg);
   }, [fieldLengthM, fieldWidthM, headingDeg, poseX, poseY]);
 
   useEffect(() => {
@@ -199,11 +208,15 @@ export default function FieldView({
     if (!visionPoseVisible) {
       return;
     }
-    const clampedX = THREE.MathUtils.clamp(visionPoseX ?? 0, 0, fieldLengthM);
-    const clampedY = THREE.MathUtils.clamp(visionPoseY ?? 0, 0, fieldWidthM);
-    visionRobot.position.x = clampedX - fieldLengthM / 2;
-    visionRobot.position.z = clampedY - fieldWidthM / 2;
-    visionRobot.rotation.y = THREE.MathUtils.degToRad(visionHeadingDeg ?? 0);
+    const { wx, wz } = fieldPoseToWorldXZ(
+      visionPoseX ?? 0,
+      visionPoseY ?? 0,
+      fieldLengthM,
+      fieldWidthM
+    );
+    visionRobot.position.x = wx;
+    visionRobot.position.z = wz;
+    visionRobot.rotation.y = fieldHeadingDegToSceneYawRad(visionHeadingDeg ?? 0);
   }, [
     fieldLengthM,
     fieldWidthM,
@@ -232,10 +245,16 @@ export default function FieldView({
     });
 
     for (const p of points) {
+      const { wx, wz } = fieldPoseToWorldXZ(
+        p.x,
+        p.y,
+        fieldLengthM,
+        fieldWidthM
+      );
       const marker = new THREE.Mesh(sphereGeometry, sphereMaterial);
-      marker.position.x = p.x - fieldLengthM / 2;
+      marker.position.x = wx;
       marker.position.y = 0.12;
-      marker.position.z = p.y - fieldWidthM / 2;
+      marker.position.z = wz;
       group.add(marker);
     }
 

@@ -17,7 +17,6 @@ import edu.wpi.first.networktables.StructPublisher;
 import com.ctre.phoenix6.Utils;
 
 import edu.wpi.first.wpilibj.DriverStation;
-import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
@@ -35,7 +34,7 @@ import frc.robot.VisionConstants;
  * Fused {@link Pose2d} struct on NetworkTables: {@code /SmartDashboard/Odometry/FusedPose}.
  * <p>
  * Debug: {@code Pose/idealShooterPose} — {@code [x, y]} copied from fused odometry; {@code headingDeg} is
- * freshly computed so the robot would face the hub from that position ({@link DriveConstants#rotationToFaceHub(Pose2d)}).
+ * freshly computed so the robot would face the hub from that position ({@link DriveConstants#rotationToFaceHubFromShotMap(Pose2d)} — KNN map offsets).
  */
 public class VisionMeasurement extends SubsystemBase {
     private final CommandSwerveDrivetrain m_drivetrain;
@@ -80,6 +79,25 @@ public class VisionMeasurement extends SubsystemBase {
     private final double[] m_limelightEstimatedPose = new double[3];
     private final double[] m_limelight2EstimatedPose = new double[3];
 
+    /** Cached each {@link #periodic()} for lightweight readers (e.g. CSV session log). */
+    private boolean m_primaryTvLock;
+    private boolean m_secondaryTvLock;
+    private double m_primaryTxDeg;
+    private double m_primaryTyDeg;
+    private double m_secondaryTxDeg;
+    private double m_secondaryTyDeg;
+
+    /** Limelight MegaTag field pose from NT (WPIBlue or WPIRed per alliance), cached for logging. */
+    private boolean m_primaryReportedPoseValid;
+    private double m_primaryReportedPoseXMeters;
+    private double m_primaryReportedPoseYMeters;
+    private double m_primaryReportedPoseDeg;
+
+    private boolean m_secondaryReportedPoseValid;
+    private double m_secondaryReportedPoseXMeters;
+    private double m_secondaryReportedPoseYMeters;
+    private double m_secondaryReportedPoseDeg;
+
     /** Connection throttle counters for {@link #publishLimelightToSmartDashboard}. */
     private final int[] m_periodsWithoutDataPrimary = new int[1];
     private final int[] m_periodsWithoutDataSecondary = new int[1];
@@ -119,14 +137,67 @@ public class VisionMeasurement extends SubsystemBase {
 
     /** Primary Limelight {@code tv} ≥ 1 or secondary (if configured): pipeline has a valid target. */
     public boolean limelightHasTagLock() {
-        if (LimelightHelpers.getLimelightNTDouble(m_primaryLimelightName, "tv") >= 1.0) {
-            return true;
-        }
-        if (m_secondaryLimelightName != null
-                && LimelightHelpers.getLimelightNTDouble(m_secondaryLimelightName, "tv") >= 1.0) {
-            return true;
-        }
-        return false;
+        return m_primaryTvLock || (m_secondaryLimelightName != null && m_secondaryTvLock);
+    }
+
+    /** {@code tv} ≥ 1 on the primary Limelight (updated each vision periodic). */
+    public boolean primaryLimelightHasTagLock() {
+        return m_primaryTvLock;
+    }
+
+    /** {@code tv} ≥ 1 on the secondary Limelight, or false if no secondary camera. */
+    public boolean secondaryLimelightHasTagLock() {
+        return m_secondaryLimelightName != null && m_secondaryTvLock;
+    }
+
+    public double getPrimaryTxDeg() {
+        return m_primaryTxDeg;
+    }
+
+    public double getPrimaryTyDeg() {
+        return m_primaryTyDeg;
+    }
+
+    public double getSecondaryTxDeg() {
+        return m_secondaryLimelightName != null ? m_secondaryTxDeg : 0.0;
+    }
+
+    public double getSecondaryTyDeg() {
+        return m_secondaryLimelightName != null ? m_secondaryTyDeg : 0.0;
+    }
+
+    /** Primary Limelight reported pose (valid when {@code tv} and botpose sample present). */
+    public boolean primaryReportedPoseValid() {
+        return m_primaryReportedPoseValid;
+    }
+
+    public double getPrimaryReportedPoseXMeters() {
+        return m_primaryReportedPoseXMeters;
+    }
+
+    public double getPrimaryReportedPoseYMeters() {
+        return m_primaryReportedPoseYMeters;
+    }
+
+    public double getPrimaryReportedPoseDeg() {
+        return m_primaryReportedPoseDeg;
+    }
+
+    /** Secondary Limelight reported pose; invalid if no secondary camera or no target. */
+    public boolean secondaryReportedPoseValid() {
+        return m_secondaryLimelightName != null && m_secondaryReportedPoseValid;
+    }
+
+    public double getSecondaryReportedPoseXMeters() {
+        return m_secondaryReportedPoseXMeters;
+    }
+
+    public double getSecondaryReportedPoseYMeters() {
+        return m_secondaryReportedPoseYMeters;
+    }
+
+    public double getSecondaryReportedPoseDeg() {
+        return m_secondaryReportedPoseDeg;
     }
 
     @Override
@@ -145,17 +216,29 @@ public class VisionMeasurement extends SubsystemBase {
                 "Limelight/", m_primaryLimelightName, ntPosePrimary, m_periodsWithoutDataPrimary);
 
         double tvPrimary = LimelightHelpers.getLimelightNTDouble(m_primaryLimelightName, "tv");
+        m_primaryTvLock = tvPrimary >= 1.0;
+        m_primaryTxDeg = LimelightHelpers.getLimelightNTDouble(m_primaryLimelightName, "tx");
+        m_primaryTyDeg = LimelightHelpers.getLimelightNTDouble(m_primaryLimelightName, "ty");
         boolean validPrimary = tvPrimary >= 1.0 && ntPosePrimary.isPresent();
         if (validPrimary) {
+            var reported = ntPosePrimary.get().pose;
+            m_primaryReportedPoseValid = true;
+            m_primaryReportedPoseXMeters = reported.getX();
+            m_primaryReportedPoseYMeters = reported.getY();
+            m_primaryReportedPoseDeg = reported.getRotation().getDegrees();
             publishLimelightEstimatedPose(
                     m_limelightEstimatedPose,
                     m_limelightEstimatedPosePublisher,
                     m_limelightEstimatedPoseValidPublisher,
-                    ntPosePrimary.get().pose);
+                    reported);
             if (DriverStation.isEnabled()) {
                 fuseBotPoseFromNetworkTables(ntPosePrimary.get());
             }
         } else {
+            m_primaryReportedPoseValid = false;
+            m_primaryReportedPoseXMeters = 0.0;
+            m_primaryReportedPoseYMeters = 0.0;
+            m_primaryReportedPoseDeg = 0.0;
             m_limelightEstimatedPoseValidPublisher.set(false);
         }
 
@@ -166,31 +249,50 @@ public class VisionMeasurement extends SubsystemBase {
                     "Limelight2/", m_secondaryLimelightName, ntPoseSecondary, m_periodsWithoutDataSecondary);
 
             double tvSecondary = LimelightHelpers.getLimelightNTDouble(m_secondaryLimelightName, "tv");
+            m_secondaryTvLock = tvSecondary >= 1.0;
+            m_secondaryTxDeg = LimelightHelpers.getLimelightNTDouble(m_secondaryLimelightName, "tx");
+            m_secondaryTyDeg = LimelightHelpers.getLimelightNTDouble(m_secondaryLimelightName, "ty");
             boolean validSecondary = tvSecondary >= 1.0 && ntPoseSecondary.isPresent();
             if (validSecondary) {
+                var reported2 = ntPoseSecondary.get().pose;
+                m_secondaryReportedPoseValid = true;
+                m_secondaryReportedPoseXMeters = reported2.getX();
+                m_secondaryReportedPoseYMeters = reported2.getY();
+                m_secondaryReportedPoseDeg = reported2.getRotation().getDegrees();
                 publishLimelightEstimatedPose(
                         m_limelight2EstimatedPose,
                         m_limelight2EstimatedPosePublisher,
                         m_limelight2EstimatedPoseValidPublisher,
-                        ntPoseSecondary.get().pose);
+                        reported2);
                 if (DriverStation.isEnabled()) {
                     fuseBotPoseFromNetworkTables(ntPoseSecondary.get());
                 }
             } else {
+                m_secondaryReportedPoseValid = false;
+                m_secondaryReportedPoseXMeters = 0.0;
+                m_secondaryReportedPoseYMeters = 0.0;
+                m_secondaryReportedPoseDeg = 0.0;
                 m_limelight2EstimatedPoseValidPublisher.set(false);
             }
+        } else {
+            m_secondaryTvLock = false;
+            m_secondaryTxDeg = 0.0;
+            m_secondaryTyDeg = 0.0;
+            m_secondaryReportedPoseValid = false;
+            m_secondaryReportedPoseXMeters = 0.0;
+            m_secondaryReportedPoseYMeters = 0.0;
+            m_secondaryReportedPoseDeg = 0.0;
         }
 
         publishFusedRobotPoseToDashboard(m_drivetrain.getState().Pose);
     }
 
-    /** {@code botpose_orb_wpi*} when MegaTag2, else {@code botpose_wpi*}, matching alliance. */
+    /**
+     * Always WPIBlue: PathPlanner / {@code getState().Pose} use the blue-origin WPILib field frame.
+     * {@code *_wpired} is a different origin; alliance path flip does not convert fused pose — fuse WPIBlue only.
+     */
     private String botPoseNtEntryName() {
-        boolean isRed = DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red;
-        if (m_useMegaTag2) {
-            return isRed ? "botpose_orb_wpired" : "botpose_orb_wpiblue";
-        }
-        return isRed ? "botpose_wpired" : "botpose_wpiblue";
+        return m_useMegaTag2 ? "botpose_orb_wpiblue" : "botpose_wpiblue";
     }
 
     private void fuseBotPoseFromNetworkTables(BotPoseNetworkTableSample sample) {
@@ -283,7 +385,7 @@ public class VisionMeasurement extends SubsystemBase {
 
         double odometryX = pose.getX();
         double odometryY = pose.getY();
-        var hubFacingRotation = DriveConstants.rotationToFaceHub(pose);
+        var hubFacingRotation = DriveConstants.rotationToFaceHubFromShotMap(pose);
         m_idealShooterPose[0] = odometryX;
         m_idealShooterPose[1] = odometryY;
         m_idealShooterPose[2] = hubFacingRotation.getDegrees();

@@ -8,7 +8,6 @@ import com.ctre.phoenix6.HootAutoReplay;
 import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.Utils;
 
-import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.cameraserver.CameraServer;
 import edu.wpi.first.cscore.UsbCamera;
 import edu.wpi.first.net.PortForwarder;
@@ -36,6 +35,7 @@ public class Robot extends TimedRobot {
     private Command m_autonomousCommand;
 
     private final RobotContainer m_robotContainer;
+    private final MatchSessionLogger m_matchSessionLogger = new MatchSessionLogger();
 
     /* log and replay timestamp and joystick data */
     private final HootAutoReplay m_timeAndJoystickReplay = new HootAutoReplay()
@@ -63,6 +63,7 @@ public class Robot extends TimedRobot {
         // m_robotContainer.flipDriveDirection();
 
         registerCommandSchedulerDiagnostics();
+        m_matchSessionLogger.robotInit();
     }
 
     private void registerCommandSchedulerDiagnostics() {
@@ -95,15 +96,20 @@ public class Robot extends TimedRobot {
         CommandScheduler cs = CommandScheduler.getInstance();
         cs.run();
         m_robotContainer.applyKnnHoodInterpolation();
+        m_robotContainer.getShooter().applyHoodMotorClosedLoopTick();
         if (DriverStation.isAutonomous()) {
             AutoDiagnostics.publishActiveDriveCommand(cs.requiring(m_robotContainer.drivetrain));
             AutoDiagnostics.publishAutonomousSchedulerSnap(m_autonomousCommand, cs, m_robotContainer.drivetrain);
         }
         m_robotContainer.updateDriverRumble();
+        m_robotContainer.publishHubAlignTelemetry();
+        m_matchSessionLogger.periodic(m_robotContainer.drivetrain, m_robotContainer.visionMeasurement);
     }
 
     @Override
     public void disabledInit() {
+        m_matchSessionLogger.flush();
+        CommandScheduler.getInstance().cancelAll();
         m_robotContainer.clearDriverRumble();
         m_robotContainer.getShooter().setShooterReady(false);
         m_robotContainer.getIntake().setPivotReady(false);
@@ -126,18 +132,17 @@ public class Robot extends TimedRobot {
             m_robotContainer.getShooter().setShooterReady(true);
             m_robotContainer.getIntake().setPivotReady(true);
         } else {
-            // In auto on real robot, home hood first, then run selected auto.
-            // This prevents shooter commands in auto from interrupting homing.
+            // Hood homing first, then PathPlanner auto — avoids parallel init fighting PathPlannerAuto / follower
+            // (which was preventing paths from running reliably). Odometry is seeded to the auto start pose before
+            // this (see seedOdometryForAuto).
             m_robotContainer.getShooter().setShooterReady(false);
+            m_robotContainer.seedOdometryForAuto(selectedAuto);
+            Command hoodHoming = m_robotContainer.getHoodHomingCommand();
             if (selectedAuto != null) {
-                m_autonomousCommand = m_robotContainer
-                        .getHoodHomingCommand()
-                        .andThen(selectedAuto)
-                        .withName("AutoWithHoodHoming");
+                m_autonomousCommand = hoodHoming.andThen(selectedAuto).withName("AutoWithHoodHoming");
             } else {
-                m_autonomousCommand = m_robotContainer.getHoodHomingCommand().withName("HoodHomingOnly");
+                m_autonomousCommand = hoodHoming.withName("HoodHomingOnly");
             }
-            // CommandScheduler.getInstance().schedule(m_robotContainer.getPivotHomingCommand());
         }
 
         // Chassis: match SwerveWithPathPlanner — schedule auto only; subsystem requirements handle the
@@ -158,15 +163,19 @@ public class Robot extends TimedRobot {
 
     @Override
     public void autonomousExit() {
-        // Clear auto path odometry so teleop / next enable starts from a neutral pose estimate.
-        m_robotContainer.drivetrain.resetPose(new Pose2d());
+        // Stop PathPlanner / nested commands so outputs do not persist. Do not reset pose to (0,0) here —
+        // that broke path following on re-enable and disagreed with PathPlanner/vision; fused pose is kept
+        // for teleop and the next auto (seedOdometryForAuto corrects only when odometry is still uninitialized).
+        CommandScheduler.getInstance().cancelAll();
     }
 
     @Override
     public void teleopInit() {
-        if (m_autonomousCommand != null) {
-            CommandScheduler.getInstance().cancel(m_autonomousCommand);
-        }
+        // cancel(m_autonomousCommand) is not enough: composed autos and PathPlanner internals may leave
+        // other commands scheduled that still require the drivetrain. Clear the scheduler, then only add
+        // what teleop needs (e.g. hood homing); default drive is re-scheduled automatically for swerve.
+        CommandScheduler.getInstance().cancelAll();
+        m_autonomousCommand = null;
 
         if (Utils.isSimulation()) {
             m_robotContainer.getShooter().setShooterReady(true);

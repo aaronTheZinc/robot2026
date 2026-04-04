@@ -20,6 +20,20 @@ public class ShooterCommands {
         return Commands.runOnce(shooter::decrementHoodDegrees, shooter);
     }
 
+    /** Subsystem controller POV up: step hood up every {@link ShooterConstants#kHoodPovRepeatDelaySeconds} while held. */
+    public Command getAdjustHoodUpWhileHeldCommand() {
+        return Commands.repeatingSequence(
+                Commands.runOnce(shooter::incrementHoodDegrees, shooter),
+                Commands.waitSeconds(ShooterConstants.kHoodPovRepeatDelaySeconds));
+    }
+
+    /** Subsystem controller POV down: step hood down every {@link ShooterConstants#kHoodPovRepeatDelaySeconds} while held. */
+    public Command getAdjustHoodDownWhileHeldCommand() {
+        return Commands.repeatingSequence(
+                Commands.runOnce(shooter::decrementHoodDegrees, shooter),
+                Commands.waitSeconds(ShooterConstants.kHoodPovRepeatDelaySeconds));
+    }
+
     public Command getIncrementShooterRpmCommand() {
         return Commands.runOnce(shooter::incrementShooterRpm, shooter);
     }
@@ -35,19 +49,30 @@ public class ShooterCommands {
                 .finallyDo(shooter::stopShooter);
     }
 
-    /** Runs hood + closed-loop shooter at the given profile until interrupted. */
-    public Command getRunShotProfileCommand(double hoodAngleDeg, double rpm) {
+    /**
+     * Hold hood + RPM with no {@code finallyDo} cleanup — use when composing ramp + feed sequences so cleanup
+     * runs once at the end (deadline cancelling an inner command must not stow between phases).
+     */
+    public Command getRunShotProfileHoldCommand(double hoodAngleDeg, double rpm) {
         return Commands.run(
-                () -> {
-                    shooter.setDashboardSetpointControlEnabled(false);
-                    shooter.setHoodAngle(hoodAngleDeg);
-                    shooter.setShooterRpm(rpm);
-                },
-                shooter)
-                .finallyDo(() -> {
-                    shooter.stopShooter();
-                    shooter.setDashboardSetpointControlEnabled(true);
-                });
+                        () -> {
+                            shooter.setDashboardSetpointControlEnabled(false);
+                            shooter.setHoodAngle(hoodAngleDeg);
+                            shooter.setShooterRpm(rpm);
+                        },
+                        shooter)
+                .beforeStarting(shooter::clearKnnHoodManualTuneBlock);
+    }
+
+    /** Runs hood + closed-loop shooter at the given profile until interrupted; stows on end. */
+    public Command getRunShotProfileCommand(double hoodAngleDeg, double rpm) {
+        return getRunShotProfileHoldCommand(hoodAngleDeg, rpm)
+                .finallyDo(
+                        () -> {
+                            shooter.stopShooter();
+                            shooter.stowHoodAndSyncDashboardAfterProfile();
+                            shooter.setDashboardSetpointControlEnabled(true);
+                        });
     }
 
     public Command getRunWingShotCommand() {
@@ -56,8 +81,48 @@ public class ShooterCommands {
                 ShooterConstants.kWingShotRpm);
     }
 
+    public Command getRunWingShotHoldCommand() {
+        return getRunShotProfileHoldCommand(
+                ShooterConstants.kWingShotHoodAngleDeg,
+                ShooterConstants.kWingShotRpm);
+    }
+
+    /**
+     * Teleop B ramp/feed segments: manual hood + RPM only — does not clear the KNN hood block (inferred hood must not
+     * win during scheduler gaps). Sequence {@code finallyDo} clears after the shot.
+     */
+    public Command getRunWingShotWithManualHoldCommand() {
+        return Commands.run(
+                () -> {
+                    shooter.setDashboardSetpointControlEnabled(false);
+                    shooter.setHoodAngle(shooter.getHoodSetpointDegrees());
+                    shooter.setShooterRpm(shooter.getShooterRpmSetpoint());
+                },
+                shooter);
+    }
+
+    /**
+     * Standalone teleop B profile with stow on interrupt/end. For sequences use {@link #getRunWingShotWithManualHoldCommand()}.
+     */
+    public Command getRunWingShotWithManualRpmCommand() {
+        return getRunWingShotWithManualHoldCommand()
+                .finallyDo(
+                        () -> {
+                            shooter.stopShooter();
+                            shooter.stowHoodAndSyncDashboardAfterProfile();
+                            shooter.setDashboardSetpointControlEnabled(true);
+                            shooter.clearKnnHoodManualTuneBlock();
+                        });
+    }
+
     public Command getRunCenterShotCommand() {
         return getRunShotProfileCommand(
+                ShooterConstants.kLeftBumperShotHoodAngleDeg,
+                ShooterConstants.kLeftBumperShotRpm);
+    }
+
+    public Command getRunCenterShotHoldCommand() {
+        return getRunShotProfileHoldCommand(
                 ShooterConstants.kLeftBumperShotHoodAngleDeg,
                 ShooterConstants.kLeftBumperShotRpm);
     }

@@ -1,6 +1,11 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 
+import {
+  fieldHeadingDegToSceneYawRad,
+  fieldPoseToWorldXZ,
+} from '../lib/simFieldToThree';
+
 const ROBOT_HEIGHT_M = 0.18;
 
 /** Shortest signed angle from current heading to hub-facing ideal (degrees). */
@@ -23,7 +28,7 @@ type ChassisViewProps = {
   visionPoseY?: number;
   visionHeadingDeg?: number;
   visionPoseVisible?: boolean;
-  /** Hub-facing heading debug (same XY as fused pose, ideal rotation toward hub). */
+  /** Hub-facing heading debug (same XY as fused pose; heading = shot-map hub aim from robot). */
   idealShooterPoseX?: number;
   idealShooterPoseY?: number;
   idealShooterHeadingDeg?: number;
@@ -85,7 +90,8 @@ export default function ChassisView({
       0.1,
       100
     );
-    camera.position.set(0, 12, 14);
+    /* Blue alliance / field (0,0) on −X; view from outside that wall toward +X (red). */
+    camera.position.set(-14, 12, 3.5);
     camera.lookAt(0, 0, 0);
 
     const ambient = new THREE.AmbientLight(0xffffff, 0.7);
@@ -231,11 +237,15 @@ export default function ChassisView({
   useEffect(() => {
     const robot = robotRef.current;
     if (!robot) return;
-    const clampedX = THREE.MathUtils.clamp(poseX, 0, fieldLengthM);
-    const clampedY = THREE.MathUtils.clamp(poseY, 0, fieldWidthM);
-    robot.position.x = clampedX - fieldLengthM / 2;
-    robot.position.z = clampedY - fieldWidthM / 2;
-    robot.rotation.y = THREE.MathUtils.degToRad(headingDeg);
+    const { wx, wz } = fieldPoseToWorldXZ(
+      poseX,
+      poseY,
+      fieldLengthM,
+      fieldWidthM
+    );
+    robot.position.x = wx;
+    robot.position.z = wz;
+    robot.rotation.y = fieldHeadingDegToSceneYawRad(headingDeg);
   }, [fieldLengthM, fieldWidthM, headingDeg, poseX, poseY]);
 
   useEffect(() => {
@@ -243,11 +253,15 @@ export default function ChassisView({
     if (!visionRobot) return;
     visionRobot.visible = visionPoseVisible;
     if (!visionPoseVisible) return;
-    const clampedX = THREE.MathUtils.clamp(visionPoseX ?? 0, 0, fieldLengthM);
-    const clampedY = THREE.MathUtils.clamp(visionPoseY ?? 0, 0, fieldWidthM);
-    visionRobot.position.x = clampedX - fieldLengthM / 2;
-    visionRobot.position.z = clampedY - fieldWidthM / 2;
-    visionRobot.rotation.y = THREE.MathUtils.degToRad(visionHeadingDeg ?? 0);
+    const { wx, wz } = fieldPoseToWorldXZ(
+      visionPoseX ?? 0,
+      visionPoseY ?? 0,
+      fieldLengthM,
+      fieldWidthM
+    );
+    visionRobot.position.x = wx;
+    visionRobot.position.z = wz;
+    visionRobot.rotation.y = fieldHeadingDegToSceneYawRad(visionHeadingDeg ?? 0);
   }, [
     fieldLengthM,
     fieldWidthM,
@@ -262,11 +276,15 @@ export default function ChassisView({
     if (!ideal) return;
     ideal.visible = idealShooterPoseVisible ?? true;
     if (!ideal.visible) return;
-    const clampedX = THREE.MathUtils.clamp(idealShooterPoseX ?? 0, 0, fieldLengthM);
-    const clampedY = THREE.MathUtils.clamp(idealShooterPoseY ?? 0, 0, fieldWidthM);
-    ideal.position.x = clampedX - fieldLengthM / 2;
-    ideal.position.z = clampedY - fieldWidthM / 2;
-    ideal.rotation.y = THREE.MathUtils.degToRad(idealShooterHeadingDeg ?? 0);
+    const { wx, wz } = fieldPoseToWorldXZ(
+      idealShooterPoseX ?? 0,
+      idealShooterPoseY ?? 0,
+      fieldLengthM,
+      fieldWidthM
+    );
+    ideal.position.x = wx;
+    ideal.position.z = wz;
+    ideal.rotation.y = fieldHeadingDegToSceneYawRad(idealShooterHeadingDeg ?? 0);
   }, [
     fieldLengthM,
     fieldWidthM,
@@ -293,10 +311,16 @@ export default function ChassisView({
     });
 
     for (const t of targets) {
+      const { wx, wz } = fieldPoseToWorldXZ(
+        t.x,
+        t.y,
+        fieldLengthM,
+        fieldWidthM
+      );
       const marker = new THREE.Mesh(markerGeometry, markerMaterial);
-      marker.position.x = t.x - fieldLengthM / 2;
+      marker.position.x = wx;
       marker.position.y = 0.2;
-      marker.position.z = t.y - fieldWidthM / 2;
+      marker.position.z = wz;
       marker.rotation.x = Math.PI; // point up
       group.add(marker);
     }
@@ -329,10 +353,16 @@ export default function ChassisView({
     });
 
     for (const p of points) {
+      const { wx, wz } = fieldPoseToWorldXZ(
+        p.x,
+        p.y,
+        fieldLengthM,
+        fieldWidthM
+      );
       const marker = new THREE.Mesh(sphereGeometry, sphereMaterial);
-      marker.position.x = p.x - fieldLengthM / 2;
+      marker.position.x = wx;
       marker.position.y = 0.12;
-      marker.position.z = p.y - fieldWidthM / 2;
+      marker.position.z = wz;
       group.add(marker);
     }
 
@@ -364,7 +394,7 @@ export default function ChassisView({
         {idealShooterPoseVisible && (
           <>
             <div className="metric-row">
-              <span className="metric-label">Hub aim (ideal)</span>
+              <span className="metric-label">Hub aim (map)</span>
               <span className="metric-value">
                 {(idealShooterHeadingDeg ?? 0).toFixed(1)}°
               </span>

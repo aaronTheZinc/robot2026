@@ -127,7 +127,7 @@ export default function KnnGridView({
         <div className="knn-grid-layout">
           <div className="knn-spatial-grid-wrap">
             <div
-              className="knn-spatial-grid"
+              className="knn-spatial-grid knn-spatial-grid--wpilib-blue-origin"
               style={{
                 display: 'grid',
                 gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
@@ -161,7 +161,7 @@ export default function KnnGridView({
               })}
             </div>
             <p className="knn-grid-hint">
-              Blue = robot pose cell · Green = inferred point cell
+              Field (0,0) bottom-left — blue alliance · Blue = robot pose cell · Green = inferred point cell
               {robotSelectedIndex != null && ' · Robot selection matches'}
             </p>
           </div>

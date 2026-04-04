@@ -45,6 +45,47 @@ export function optimalHeadingToFaceHubDeg(robotFieldX: number, robotFieldY: num
   );
 }
 
+/**
+ * Mirrors {@code DriveConstants.kHubShotMapHeadingOffset*} — LSQ fit from {@code knn_map.json}.
+ * Keep in sync with Java when refitting.
+ */
+export const HUB_SHOT_MAP_HEADING_OFFSET_A = -0.024117514387849173;
+export const HUB_SHOT_MAP_HEADING_OFFSET_PER_M_DX = 0.015164153162676098;
+export const HUB_SHOT_MAP_HEADING_OFFSET_PER_M_DY = 0.03551452819037583;
+
+/** Same degenerate-distance threshold as {@code DriveConstants.rotationToFaceHubFromShotMap}. */
+export const HUB_SHOT_MAP_MIN_DIST_SQ_M2 = 1e-8;
+
+/**
+ * Additive heading correction (rad): {@code a + b·dx + c·dy} with hub−robot {@code dx, dy} (m) —
+ * mirrors the {@code offsetRad} block in {@code DriveConstants.rotationToFaceHubFromShotMap}.
+ */
+export function hubShotMapHeadingOffsetRad(
+  hubMinusRobotDxM: number,
+  hubMinusRobotDyM: number
+): number {
+  return (
+    HUB_SHOT_MAP_HEADING_OFFSET_A +
+    HUB_SHOT_MAP_HEADING_OFFSET_PER_M_DX * hubMinusRobotDxM +
+    HUB_SHOT_MAP_HEADING_OFFSET_PER_M_DY * hubMinusRobotDyM
+  );
+}
+
+/**
+ * Hub-facing heading (deg) using the continuous shot-map correction — mirrors
+ * {@code DriveConstants.rotationToFaceHubFromShotMap}.
+ */
+export function hubShotMapHeadingTowardHubDeg(robotFieldX: number, robotFieldY: number): number {
+  const dx = HUB_FIELD_X_M - robotFieldX;
+  const dy = HUB_FIELD_Y_M - robotFieldY;
+  if (dx * dx + dy * dy < HUB_SHOT_MAP_MIN_DIST_SQ_M2) {
+    return 0;
+  }
+  const thetaRad = Math.atan2(dy, dx) + hubShotMapHeadingOffsetRad(dx, dy);
+  const deg = (thetaRad * 180) / Math.PI + HUB_FACING_OFFSET_DEG;
+  return normalizeHeadingDeg(deg);
+}
+
 export function distanceBetweenFieldPointsM(
   ax: number,
   ay: number,

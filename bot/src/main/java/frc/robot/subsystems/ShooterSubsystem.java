@@ -9,6 +9,8 @@ import static edu.wpi.first.units.Units.Amps;
 import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
 import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.configs.Slot0Configs;
+import com.ctre.phoenix6.configs.VoltageConfigs;
+import com.ctre.phoenix6.controls.PositionVoltage;
 import com.ctre.phoenix6.controls.VelocityVoltage;
 import com.ctre.phoenix6.controls.VoltageOut;
 import com.ctre.phoenix6.hardware.TalonFX;
@@ -38,6 +40,12 @@ public class ShooterSubsystem extends SubsystemBase {
 
     private final VoltageOut shooterRequest = new VoltageOut(0);
     private final VoltageOut hoodVoltageRequest = new VoltageOut(0);
+    private final PositionVoltage hoodPositionRequest = new PositionVoltage(0)
+            .withSlot(0)
+            .withEnableFOC(false)
+            // Persistent Talon/Tuner soft limits often default to 0—would freeze position PID.
+            .withIgnoreSoftwareLimits(true)
+            .withIgnoreHardwareLimits(true);
     private final VelocityVoltage shooterVelocityRequest = new VelocityVoltage(0);
 
     /** True after hood has touched the mechanical stop (real) or sim has "ready" (sim). */
@@ -45,13 +53,21 @@ public class ShooterSubsystem extends SubsystemBase {
 
     /** Stored hood angle setpoint in degrees (for dashboard increment/decrement). */
     private double hoodSetpointDeg = ShooterConstants.kHoodMinAngleDeg;
-    /** Last hood voltage command sent to the motor controller. */
-    private double hoodCommandVolts = 0;
+    /** Low-pass filtered hood target from slider/NT (when adjustable). */
+    private double hoodDashboardSetpointFilteredDeg = ShooterConstants.kHoodMinAngleDeg;
 
-    /** Stored shooter RPM setpoint; 0 means open-loop / stopped. */
+    /**
+     * Target shooter RPM (POV / dashboard). Motors only track this in {@link #periodic()} while a command
+     * requires this subsystem so the setpoint can be tuned without spinning until a shot runs.
+     */
     private double shooterRpmSetpoint = 0;
     /** True when slider/NetworkTables setpoint inputs should drive hood/RPM setpoints. */
     private boolean dashboardSetpointControlEnabled = true;
+    /**
+     * After manual hood steps (subsystem POV / dashboard), KNN driving hood while idle is skipped until
+     * a shot applies hood again or the hood stows after a profile ({@link #clearKnnHoodManualTuneBlock()}).
+     */
+    private boolean knnHoodBlockedAfterManualHoodTune;
 
     private final NetworkTable shooterTable =
             NetworkTableInstance.getDefault().getTable("Shooter");
@@ -83,12 +99,21 @@ public class ShooterSubsystem extends SubsystemBase {
 
 
 
-        // Hood: current limit and brake when idle. Angle hold is handled in software
-        // using a voltage proportional to angle error.
+        // Hood: current limit, brake when idle, peak V for PositionVoltage PID, slot 0 gains.
+        // Invert must stay consistent with kHoodHomingVoltageVolts (toward mechanical stop).
         var hoodCurrentLimits = new CurrentLimitsConfigs()
                 .withStatorCurrentLimit(Amps.of(ShooterConstants.kHoodStatorCurrentLimitAmps))
                 .withStatorCurrentLimitEnable(true);
         hoodMotor.getConfigurator().apply(hoodCurrentLimits);
+        var hoodPeakVolts = new VoltageConfigs()
+                .withPeakForwardVoltage(ShooterConstants.kHoodAngleControlMaxVoltageVolts)
+                .withPeakReverseVoltage(-ShooterConstants.kHoodAngleControlMaxVoltageVolts);
+        hoodMotor.getConfigurator().apply(hoodPeakVolts);
+        var hoodSlot0 = new Slot0Configs()
+                .withKP(ShooterConstants.kHoodKp)
+                .withKI(ShooterConstants.kHoodKi)
+                .withKD(ShooterConstants.kHoodKd);
+        hoodMotor.getConfigurator().apply(hoodSlot0);
         var hoodOutput = new MotorOutputConfigs()
                 .withNeutralMode(NeutralModeValue.Brake)
                 .withInverted(InvertedValue.Clockwise_Positive);
@@ -126,15 +151,17 @@ public class ShooterSubsystem extends SubsystemBase {
         shooterRight.setControl(shooterRequest.withOutput(volts));
     }
 
-    /** Stop both shooter motors. */
+    /**
+     * Stops flywheel output without clearing {@link #shooterRpmSetpoint} so manual / B-shot RPM stays armed.
+     */
     public void stopShooter() {
-        shooterRpmSetpoint = 0;
-        setShooterVoltage(0);
+        shooterLeft.setControl(shooterVelocityRequest.withVelocity(0));
+        shooterRight.setControl(shooterVelocityRequest.withVelocity(0));
     }
 
     /**
-     * Set shooter velocity setpoint in RPM (closed-loop). Both wheels use the same setpoint.
-     * Clamped to [kShooterMinRpm, kShooterMaxRpm]. Applied in periodic().
+     * Set shooter velocity setpoint in RPM (closed-loop). Clamped to [kShooterMinRpm, kShooterMaxRpm].
+     * Flywheels only track this in {@link #periodic()} while a command requires this subsystem.
      */
     public void setShooterRpm(double rpm) {
         shooterRpmSetpoint = Math.max(ShooterConstants.kShooterMinRpm,
@@ -149,6 +176,36 @@ public class ShooterSubsystem extends SubsystemBase {
     /** Enable/disable dashboard-setpoint ownership of hood and shooter RPM setpoints. */
     public void setDashboardSetpointControlEnabled(boolean enabled) {
         dashboardSetpointControlEnabled = enabled;
+    }
+
+    /**
+     * Hood to minimum angle and align dashboard/filter/NT hood inputs after a shot profile ends.
+     * This is the normal path back to stowed hood; {@link #periodic()} does not auto-stow when idle.
+     */
+    public void stowHoodAndSyncDashboardAfterProfile() {
+        hoodDashboardSetpointFilteredDeg = ShooterConstants.kHoodMinAngleDeg;
+        hoodSliderEntry.setDouble(ShooterConstants.kHoodMinAngleDeg);
+        shooterTable.getEntry("hoodSetpointInput").setDouble(ShooterConstants.kHoodMinAngleDeg);
+        setHoodAngle(ShooterConstants.kHoodMinAngleDeg);
+        clearKnnHoodManualTuneBlock();
+    }
+
+    /** Clears the block so {@link frc.robot.RobotContainer#applyKnnHoodInterpolation()} may set hood from the map again. */
+    public void clearKnnHoodManualTuneBlock() {
+        knnHoodBlockedAfterManualHoodTune = false;
+    }
+
+    /**
+     * When true, {@link frc.robot.RobotContainer#applyKnnHoodInterpolation()} must not set hood from the map.
+     * POV steps set true; teleop B (wing) sets true at sequence start; cleared when the shot ends.
+     */
+    public void setKnnHoodBlockedAfterManualTune(boolean blocked) {
+        knnHoodBlockedAfterManualHoodTune = blocked;
+    }
+
+    /** When true, KNN idle hood interpolation must not overwrite the operator hood setpoint. */
+    public boolean isKnnHoodBlockedAfterManualTune() {
+        return knnHoodBlockedAfterManualHoodTune;
     }
 
     /** Average measured RPM of left and right shooter wheels (closed-loop velocity feedback). */
@@ -171,16 +228,14 @@ public class ShooterSubsystem extends SubsystemBase {
     }
 
     /**
-     * Set hood setpoint to the given angle in degrees. Subsystem holds that angle using
-     * a voltage proportional to angle error. Angle is clamped to the configured range.
+     * Set hood setpoint in degrees. When {@link #isShooterReady()}, {@link #periodic()} applies
+     * closed-loop {@link PositionVoltage} toward this angle.
      */
     public void setHoodAngle(double degrees) {
         hoodSetpointDeg = Math.max(
                 ShooterConstants.kHoodMinAngleDeg,
                 Math.min(ShooterConstants.kHoodMaxAngleDeg, degrees));
-        if (shooterReady) {
-            applyHoodPositionVoltage();
-        } else {
+        if (!shooterReady) {
             stopHood();
         }
     }
@@ -192,20 +247,25 @@ public class ShooterSubsystem extends SubsystemBase {
 
     /** Increment hood angle setpoint by {@link ShooterConstants#kHoodDegreesIncrement}. */
     public void incrementHoodDegrees() {
+        knnHoodBlockedAfterManualHoodTune = true;
         setHoodAngle(hoodSetpointDeg + ShooterConstants.kHoodDegreesIncrement);
         hoodSliderEntry.setDouble(hoodSetpointDeg);
+        hoodDashboardSetpointFilteredDeg = hoodSetpointDeg;
+        shooterTable.getEntry("hoodSetpointInput").setDouble(hoodSetpointDeg);
     }
 
     /** Decrement hood angle setpoint by {@link ShooterConstants#kHoodDegreesIncrement}. */
     public void decrementHoodDegrees() {
+        knnHoodBlockedAfterManualHoodTune = true;
         setHoodAngle(hoodSetpointDeg - ShooterConstants.kHoodDegreesIncrement);
         hoodSliderEntry.setDouble(hoodSetpointDeg);
+        hoodDashboardSetpointFilteredDeg = hoodSetpointDeg;
+        shooterTable.getEntry("hoodSetpointInput").setDouble(hoodSetpointDeg);
     }
 
     /** Run hood motor at normalized speed (open-loop). Speed in [-1, 1], mapped to voltage. */
     public void setHoodSpeed(double speed) {
         double volts = Math.max(-1, Math.min(1, speed)) * ShooterConstants.kMaxVoltageVolts;
-        hoodCommandVolts = volts;
         hoodMotor.setControl(hoodVoltageRequest.withOutput(volts));
     }
 
@@ -217,7 +277,6 @@ public class ShooterSubsystem extends SubsystemBase {
 
     /** Stop hood motor (voltage 0). */
     public void stopHood() {
-        hoodCommandVolts = 0;
         hoodMotor.setControl(hoodVoltageRequest.withOutput(0));
     }
 
@@ -225,7 +284,6 @@ public class ShooterSubsystem extends SubsystemBase {
     public void setHoodVoltage(double volts) {
         double clamped = Math.max(-ShooterConstants.kMaxVoltageVolts,
                 Math.min(ShooterConstants.kMaxVoltageVolts, volts));
-        hoodCommandVolts = clamped;
         hoodMotor.setControl(hoodVoltageRequest.withOutput(clamped));
     }
 
@@ -259,33 +317,29 @@ public class ShooterSubsystem extends SubsystemBase {
     public void zeroHoodPosition() {
         hoodMotor.setPosition(0);
         hoodSetpointDeg = 0;
+        hoodDashboardSetpointFilteredDeg = 0;
         hoodSliderEntry.setDouble(hoodSetpointDeg);
+        clearKnnHoodManualTuneBlock();
     }
 
-    private void applyHoodPositionVoltage() {
+    /**
+     * Applies hood {@link PositionVoltage} toward {@link #hoodSetpointDeg}. Call once per
+     * {@code Robot.robotPeriodic} <em>after</em> {@code applyKnnHoodInterpolation()} so KNN updates
+     * reach the Talon the same cycle.
+     */
+    public void applyHoodMotorClosedLoopTick() {
         if (!shooterReady) {
-            stopHood();
             return;
         }
 
         double errorDeg = getHoodAngleErrorDegrees();
-
         if (Math.abs(errorDeg) <= ShooterConstants.kHoodAngleToleranceDeg) {
-            hoodCommandVolts = 0;
             hoodMotor.setControl(hoodVoltageRequest.withOutput(0));
             return;
         }
 
-        double volts = errorDeg * ShooterConstants.kHoodAngleErrorVoltsPerDeg;
-        double minMoveVolts = ShooterConstants.kHoodAngleControlMinVoltageVolts;
-        if (Math.abs(volts) < minMoveVolts) {
-            volts = Math.copySign(minMoveVolts, errorDeg);
-        }
-        double clampedVolts = Math.max(
-                -ShooterConstants.kHoodAngleControlMaxVoltageVolts,
-                Math.min(ShooterConstants.kHoodAngleControlMaxVoltageVolts, volts));
-        hoodCommandVolts = clampedVolts;
-        hoodMotor.setControl(hoodVoltageRequest.withOutput(clampedVolts));
+        double setpointRot = hoodSetpointDeg / ShooterConstants.kHoodDegreesPerMotorRev;
+        hoodMotor.setControl(hoodPositionRequest.withPosition(setpointRot));
     }
 
     private double getHoodAngleErrorDegrees() {
@@ -296,28 +350,41 @@ public class ShooterSubsystem extends SubsystemBase {
     public void periodic() {
         // Do not overwrite hood/RPM from sliders/NT while a command requires this subsystem (e.g. shot profile).
         // Otherwise a profile's finallyDo can re-enable dashboard for one cycle and fight closed-loop hood/RPM.
-        if (dashboardSetpointControlEnabled
-                && CommandScheduler.getInstance().requiring(this) == null) {
-            // Apply setpoints from slider input: robot-dashboard (NT) takes priority, else SmartDashboard sliders
+        var cs = CommandScheduler.getInstance();
+        boolean noShooterCommand = cs.requiring(this) == null;
+
+        if (dashboardSetpointControlEnabled && noShooterCommand) {
+            // Hood/RPM from robot-dashboard (NT) or Shuffleboard; hood is not auto-stowed here—only
+            // stowHoodAndSyncDashboardAfterProfile() after shot sequences resets to min.
             double hoodInput = shooterTable.getEntry("hoodSetpointInput").getDouble(Double.NaN);
-            double hoodToApply = Double.isNaN(hoodInput) ? hoodSliderEntry.getDouble(hoodSetpointDeg) : hoodInput;
-            setHoodAngle(hoodToApply);
+            double hoodToApply =
+                    Double.isNaN(hoodInput) ? hoodSliderEntry.getDouble(hoodSetpointDeg) : hoodInput;
+            double delta = hoodToApply - hoodDashboardSetpointFilteredDeg;
+            if (Math.abs(delta) > ShooterConstants.kHoodDashboardSetpointSnapThresholdDeg) {
+                hoodDashboardSetpointFilteredDeg = hoodToApply;
+            } else {
+                hoodDashboardSetpointFilteredDeg +=
+                        ShooterConstants.kHoodDashboardSetpointSmoothingAlpha * delta;
+            }
+            setHoodAngle(hoodDashboardSetpointFilteredDeg);
 
             double rpmInput = shooterTable.getEntry("rpmSetpointInput").getDouble(Double.NaN);
             double rpmToApply = Double.isNaN(rpmInput) ? rpmSliderEntry.getDouble(shooterRpmSetpoint) : rpmInput;
             setShooterRpm(rpmToApply);
         }
 
-        if (shooterRpmSetpoint != 0) {
+        if (!noShooterCommand && shooterRpmSetpoint != 0) {
             double rps = shooterRpmSetpoint / 60.0;
             shooterLeft.setControl(shooterVelocityRequest.withVelocity(rps));
             shooterRight.setControl(shooterVelocityRequest.withVelocity(rps));
         }
+
         SmartDashboard.putBoolean("Shooter Ready", shooterReady);
         SmartDashboard.putNumber("Hood Angle (deg)", getHoodAngleDegrees());
         SmartDashboard.putNumber("Hood Setpoint (deg)", hoodSetpointDeg);
         SmartDashboard.putNumber("Hood Error (deg)", getHoodAngleErrorDegrees());
-        SmartDashboard.putNumber("Hood Command Voltage (V)", hoodCommandVolts);
+        SmartDashboard.putNumber(
+                "Hood Command Voltage (V)", hoodMotor.getMotorVoltage().getValueAsDouble());
         SmartDashboard.putNumber("Shooter RPM", getShooterRpm());
         SmartDashboard.putNumber("Shooter RPM Setpoint", shooterRpmSetpoint);
 

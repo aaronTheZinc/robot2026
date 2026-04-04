@@ -12,6 +12,7 @@ import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.auto.NamedCommands;
 import com.pathplanner.lib.commands.FollowPathCommand;
+import com.pathplanner.lib.commands.PathPlannerAuto;
 
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -30,10 +31,10 @@ import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 import java.util.Set;
 
 import frc.robot.commands.DriveCommands;
+import frc.robot.commands.HubAlignCommands;
 import frc.robot.commands.IntakeCommands;
 import frc.robot.commands.ShooterCommands;
 import frc.robot.generated.TunerConstants;
-import frc.robot.knn.KnnConstants;
 import frc.robot.knn.KnnInterpreter;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.IntakeSubsystem;
@@ -42,6 +43,8 @@ import frc.robot.subsystems.VisionMeasurement;
 
 public class RobotContainer {
     private static final double kAutoIntakeSequenceSeconds = 1.5;
+    /** PathPlanner {@code Intake 6s} named command duration. */
+    private static final double kAutoIntakeSixSeconds = 6.0;
     private static final String kDriveAssistTargetXKey = "Drive Assist/Target X (m)";
     private static final String kDriveAssistTargetYKey = "Drive Assist/Target Y (m)";
     private static final String kDriveAssistTargetHeadingKey = "Drive Assist/Target Heading (deg)";
@@ -49,11 +52,13 @@ public class RobotContainer {
     private static final double kBackTranslationMps =
             0.45 * TunerConstants.kSpeedAt12Volts.in(MetersPerSecond);
     private static final double kNamedBackTranslationSeconds = 2.0;
+    /**
+     * Extra field heading (deg) on top of hub bearing + calibration for PathPlanner {@code Point and Shoot Depo}
+     * only (e.g. depo-grab auto).
+     */
+    private static final double kDepoGrabPointAndShootExtraHeadingDeg = -28.0;
     private static final double kShotRampSeconds = 1.0;
     private static final double kAutoShotFeedSeconds = 2;
-    /** Driver right bumper: pathfind to this field pose (m, m, deg). */
-    private static final Pose2d kDriverRightBumperWaypoint =
-            new Pose2d(3.5, 7.3, Rotation2d.fromDegrees(30.0));
     /** Driver Xbox rumble (0–1) while Limelight reports a tag lock ({@code tv}). */
     private static final double kDriverTagLockRumble = 0.4;
     /** Same as Phoenix SwerveWithPathPlanner example: full kSpeedAt12Volts top speed. */
@@ -64,6 +69,11 @@ public class RobotContainer {
     private final SwerveRequest.FieldCentric drive = new SwerveRequest.FieldCentric()
             .withDeadband(MaxSpeed * 0.1).withRotationalDeadband(MaxAngularRate * 0.1) // Add a 10% deadband
             .withDriveRequestType(DriveRequestType.OpenLoopVoltage); // Use open-loop control for drive motors
+    /** Same as {@link #drive} but no rotational deadband so small hub-align omega is not zeroed. */
+    private final SwerveRequest.FieldCentric driveHubAlign = new SwerveRequest.FieldCentric()
+            .withDeadband(MaxSpeed * 0.1)
+            .withRotationalDeadband(0)
+            .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
     private final SwerveRequest.SwerveDriveBrake brake = new SwerveRequest.SwerveDriveBrake();
     private final SwerveRequest.PointWheelsAt point = new SwerveRequest.PointWheelsAt();
     private final SwerveRequest.RobotCentric forwardStraight = new SwerveRequest.RobotCentric()
@@ -71,14 +81,18 @@ public class RobotContainer {
 
     private final Telemetry logger = new Telemetry(MaxSpeed);
     private final KnnInterpreter knnInterpreter = new KnnInterpreter();
-    /** Tracks {@link KnnConstants#kInterpolateHoodWhileDriving} so we re-enable dashboard sliders when it is false. */
+    /** Tracks {@link frc.robot.knn.KnnConstants#kInterpolateHoodWhileDriving} so we re-enable dashboard sliders when it is false. */
     private boolean knnInterpolationWasEnabled = false;
+    /** L3: sample hub heading offset at current distance; scaled offset = cal × (d / d_cal). */
+    private final HubAlignCalibration hubAlignCalibration = new HubAlignCalibration();
 
     private final CommandXboxController joystick = new CommandXboxController(0);
     private final CommandXboxController subsystems = new CommandXboxController(1);
 
 
     public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
+    private final HubAlignCommands hubAlignCommands =
+            new HubAlignCommands(drivetrain, hubAlignCalibration);
     private final DriveCommands driveCommands = new DriveCommands(drivetrain, kBackTranslationMps);
     /**
      * Declared after {@code drivetrain} so periodic runs after swerve odometry; publishes {@code Pose/robotPose}
@@ -105,11 +119,28 @@ public class RobotContainer {
             )
         );
         NamedCommands.registerCommand(
+            "Intake 6s",
+            Commands.deadline(
+                    Commands.waitSeconds(kAutoIntakeSixSeconds), intakeCommands.getIntakeCommand())
+                    .withName("Intake 6s"));
+        NamedCommands.registerCommand(
             "Back Translation",
-            driveCommands.getBackTranslationForSeconds(kNamedBackTranslationSeconds));
+            driveCommands
+                    .getBackTranslationForSeconds(kNamedBackTranslationSeconds)
+                    .finallyDo(() -> drivetrain.setControl(brake)));
+        NamedCommands.registerCommand("Point and Shoot", getPointAndShootCommand());
+        NamedCommands.registerCommand("Point and Shoot Depo", getDepoPointAndShootCommand());
+        NamedCommands.registerCommand("Heading 0", getFaceFieldHeadingZeroCommand());
+
+        NamedCommands.registerCommand("roller-in", intakeCommands.getRollerIntakeHoldCommand());
+        NamedCommands.registerCommand("Pivot Home Stow", intakeCommands.getPivotHomingCommand());
+        NamedCommands.registerCommand("Pivot Home Down", intakeCommands.getPivotDownHomingCommand());
+        NamedCommands.registerCommand("Pivot To Stow", intakeCommands.getPivotToStowCommand());
+        NamedCommands.registerCommand("Pivot To Collect", intakeCommands.getPivotToCollectCommand());
 
         AutoDiagnostics.publishRegisteredNamedCommands(
-                "Center Shoot (KNN), Base Shoot (KNN), Wing Shot (KNN), Intake Sequence, Back Translation");
+                "Center Shoot, Base Shoot, Wing Shot, Intake Sequence, Intake 6s, Back Translation, Point and Shoot, "
+                        + "Point and Shoot Depo, Heading 0, roller-in, Pivot Home Stow, Pivot Home Down, Pivot To Stow, Pivot To Collect");
 
         autoChooser = AutoBuilder.buildAutoChooser("Tests");
         autoChooser.addOption("Basic Shoot Auto", getBasicShootAutoCommand());
@@ -122,7 +153,7 @@ public class RobotContainer {
         SmartDashboard.putData("Debug/Decrement Shooter RPM", shooterCommands.getDecrementShooterRpmCommand());
         SmartDashboard.putString(
                 "Drive Assist/Source",
-                "KNN: subsys A hold = inferred shot | hood IDW (constant) | R3 = RPM");
+                "KNN: A hold = inferred shot (hood up only during shot) | R3 = RPM | hood stowed when idle");
         SmartDashboard.putNumber(kDriveAssistTargetXKey, 0.0);
         SmartDashboard.putNumber(kDriveAssistTargetYKey, 0.0);
         SmartDashboard.putNumber(kDriveAssistTargetHeadingKey, 0.0);
@@ -138,6 +169,55 @@ public class RobotContainer {
 
     private Command getBasicShootAutoCommand() {
         return getKnnInferredAutoShotSequenceCommand(false);
+    }
+
+    /** PathPlanner named command: rotate in place toward hub, then same KNN-inferred ramp/feed as Center Shoot. */
+    private Command getPointAndShootCommand() {
+        return Commands.sequence(
+                        hubAlignCommands.getRotateToHubInPlaceCommand(),
+                        getKnnInferredAutoShotSequenceCommand(false))
+                .withName("Point and Shoot");
+    }
+
+    /**
+     * PathPlanner named command for depo auto only: aim {@link #kDepoGrabPointAndShootExtraHeadingDeg}° off default
+     * hub bearing, then same KNN shot sequence as {@link #getPointAndShootCommand()}.
+     */
+    private Command getDepoPointAndShootCommand() {
+        return Commands.sequence(
+                        hubAlignCommands.getRotateToHubInPlaceCommand(kDepoGrabPointAndShootExtraHeadingDeg),
+                        getKnnInferredAutoShotSequenceCommand(false))
+                .withName("Point and Shoot Depo");
+    }
+
+    /**
+     * PathPlanner named command: rotate in place until fused field heading is ~0 rad (+X forward), then brake.
+     * Uses per-frame {@link SwerveRequest.FieldCentric#withRotationalRate} (same pattern as hub align) so control
+     * is not a single locked facing-angle setpoint.
+     */
+    private Command getFaceFieldHeadingZeroCommand() {
+        return drivetrain
+                .applyRequest(
+                        () ->
+                                driveHubAlign
+                                        .withVelocityX(0)
+                                        .withVelocityY(0)
+                                        .withRotationalRate(
+                                                DriveConstants.teleopOmegaTowardFieldHeadingZero(
+                                                        drivetrain.getState().Pose)))
+                .until(() -> DriveConstants.isFieldHeadingNearZero(drivetrain.getState().Pose))
+                .withTimeout(DriveConstants.kAutoFieldHeadingZeroTimeoutSeconds)
+                .finallyDo(() -> drivetrain.setControl(brake))
+                .withName("Heading 0");
+    }
+
+    /** Updates shooter from map: smoothed IDW hood + IDW RPM (pose from drivetrain). */
+    private void applyLiveKnnShootingSetpoints() {
+        knnInterpreter.update(drivetrain.getState().Pose);
+        shooter.clearKnnHoodManualTuneBlock();
+        shooter.setDashboardSetpointControlEnabled(false);
+        shooter.setHoodAngle(knnInterpreter.getSmoothedInterpolatedHoodDeg());
+        shooter.setShooterRpm(knnInterpreter.getInterpolatedRpm());
     }
 
     /**
@@ -157,36 +237,50 @@ public class RobotContainer {
                                 false);
                         return getAutoShotSequenceCommand(wingFallbackWhenNoMap);
                     }
-                    return getKnnMapAutoShotSequenceCommand(
-                            knnInterpreter.getInterpolatedHoodDeg(), knnInterpreter.getInterpolatedRpm());
+                    return getKnnMapAutoShotLiveSequenceCommand();
                 },
                 Set.of(shooter, intake));
     }
 
-    /** Timed ramp + feed using explicit hood/RPM (e.g. KNN snapshot at command start). */
-    private Command getKnnMapAutoShotSequenceCommand(double hoodDeg, double shooterRpm) {
-        Command rampShot = shooterCommands.getRunShotProfileCommand(hoodDeg, shooterRpm);
-        Command feedShot = shooterCommands.getRunShotProfileCommand(hoodDeg, shooterRpm);
+    /**
+     * Auto shot ramp + feed with hood/RPM updated every cycle from IDW (smoothed hood). Same timing as
+     * fixed-profile autos; {@link ShooterCommands#getRunShotProfileCommand} cleanup runs on shot end.
+     */
+    private Command getKnnMapAutoShotLiveSequenceCommand() {
+        Command rampShot = Commands.run(this::applyLiveKnnShootingSetpoints, shooter);
+        Command feedShot = Commands.run(this::applyLiveKnnShootingSetpoints, shooter);
         return Commands.sequence(
                         intakeCommands.getStopHopperCommand(),
+                        Commands.runOnce(
+                                () -> {
+                                    knnInterpreter.update(drivetrain.getState().Pose);
+                                    knnInterpreter.snapSmoothedHoodToInterpolated();
+                                    knnInterpreter.snapSmoothedRpmToInterpolated();
+                                }),
                         Commands.deadline(
-                                Commands.waitSeconds(kShotRampSeconds),
-                                rampShot),
+                                Commands.waitSeconds(kShotRampSeconds), rampShot),
                         Commands.deadline(
                                 Commands.waitSeconds(kAutoShotFeedSeconds),
                                 Commands.parallel(
-                                        feedShot,
-                                        intakeCommands.getFeedToShooterCommand())))
-                .finallyDo(() -> intake.stopHopper());
+                                        feedShot, intakeCommands.getFeedToShooterCommand())))
+                .finallyDo(
+                        () -> {
+                            intake.stopHopper();
+                            shooter.stopShooter();
+                            shooter.stowHoodAndSyncDashboardAfterProfile();
+                            shooter.setDashboardSetpointControlEnabled(true);
+                        });
     }
 
     private Command getAutoShotSequenceCommand(boolean wingShot) {
-        Command rampShot = wingShot
-            ? shooterCommands.getRunWingShotCommand()
-            : shooterCommands.getRunCenterShotCommand();
-        Command feedShot = wingShot
-            ? shooterCommands.getRunWingShotCommand()
-            : shooterCommands.getRunCenterShotCommand();
+        Command rampShot =
+                wingShot
+                        ? shooterCommands.getRunWingShotHoldCommand()
+                        : shooterCommands.getRunCenterShotHoldCommand();
+        Command feedShot =
+                wingShot
+                        ? shooterCommands.getRunWingShotHoldCommand()
+                        : shooterCommands.getRunCenterShotHoldCommand();
         return Commands.sequence(
                         intakeCommands.getStopHopperCommand(),
                         Commands.deadline(
@@ -197,17 +291,29 @@ public class RobotContainer {
                                 Commands.parallel(
                                         feedShot,
                                         intakeCommands.getFeedToShooterCommand())))
-                .finallyDo(() -> intake.stopHopper());
+                .finallyDo(
+                        () -> {
+                            intake.stopHopper();
+                            shooter.stopShooter();
+                            shooter.stowHoodAndSyncDashboardAfterProfile();
+                            shooter.setDashboardSetpointControlEnabled(true);
+                        });
     }
 
     private Command getHeldShotSequenceCommand(boolean wingShot) {
-        Command rampShot = wingShot
-            ? shooterCommands.getRunWingShotCommand()
-            : shooterCommands.getRunCenterShotCommand();
-        Command feedShot = wingShot
-            ? shooterCommands.getRunWingShotCommand()
-            : shooterCommands.getRunCenterShotCommand();
+        Command rampShot =
+                wingShot
+                        ? shooterCommands.getRunWingShotWithManualHoldCommand()
+                        : shooterCommands.getRunCenterShotHoldCommand();
+        Command feedShot =
+                wingShot
+                        ? shooterCommands.getRunWingShotWithManualHoldCommand()
+                        : shooterCommands.getRunCenterShotHoldCommand();
         return Commands.sequence(
+                        wingShot
+                                ? Commands.runOnce(
+                                        () -> shooter.setKnnHoodBlockedAfterManualTune(true), shooter)
+                                : Commands.none(),
                         intakeCommands.getStopHopperCommand(),
                         Commands.deadline(
                                 Commands.waitSeconds(kShotRampSeconds),
@@ -215,7 +321,16 @@ public class RobotContainer {
                         Commands.parallel(
                                 feedShot,
                                 intakeCommands.getFeedToShooterCommand()))
-                .finallyDo(() -> intake.stopHopper());
+                .finallyDo(
+                        () -> {
+                            intake.stopHopper();
+                            shooter.stopShooter();
+                            shooter.stowHoodAndSyncDashboardAfterProfile();
+                            shooter.setDashboardSetpointControlEnabled(true);
+                            if (wingShot) {
+                                shooter.clearKnnHoodManualTuneBlock();
+                            }
+                        });
     }
 
     private Command getCenterHeldShotSequenceCommand() {
@@ -227,39 +342,37 @@ public class RobotContainer {
     }
 
     /**
-     * Like {@link #getHeldShotSequenceCommand(boolean)} but hood/RPM come from the map. Ramp for
-     * {@link #kShotRampSeconds}, then run shooter + hopper until the trigger is released.
-     */
-    private Command getKnnMapHeldShotSequenceCommand(double hoodDeg, double shooterRpm) {
-        Command rampShot = shooterCommands.getRunShotProfileCommand(hoodDeg, shooterRpm);
-        Command feedShot = shooterCommands.getRunShotProfileCommand(hoodDeg, shooterRpm);
-        return Commands.sequence(
-                        intakeCommands.getStopHopperCommand(),
-                        Commands.deadline(
-                                Commands.waitSeconds(kShotRampSeconds),
-                                rampShot),
-                        Commands.parallel(
-                                feedShot,
-                                intakeCommands.getFeedToShooterCommand()))
-                .finallyDo(() -> intake.stopHopper());
-    }
-
-    /**
      * Held shot using IDW-inferred hood/RPM from the current pose (same inference as dashboard / R3).
      * Refreshes {@link KnnInterpreter} for the live pose when the command starts.
      */
     private Command getKnnHeldShotFromInferredCommand() {
         return Commands.defer(
                 () -> {
-                    Pose2d here = drivetrain.getState().Pose;
-                    knnInterpreter.update(here);
                     if (knnInterpreter.getMapSize() == 0) {
                         DriverStation.reportWarning("KNN: knn_map.json missing or has no points", false);
                         return Commands.none();
                     }
-                    return getKnnMapHeldShotSequenceCommand(
-                                    knnInterpreter.getInterpolatedHoodDeg(),
-                                    knnInterpreter.getInterpolatedRpm())
+                    return Commands.sequence(
+                                    intakeCommands.getStopHopperCommand(),
+                                    Commands.runOnce(
+                                            () -> {
+                                                knnInterpreter.update(drivetrain.getState().Pose);
+                                                knnInterpreter.snapSmoothedHoodToInterpolated();
+                                                knnInterpreter.snapSmoothedRpmToInterpolated();
+                                            }),
+                                    Commands.deadline(
+                                            Commands.waitSeconds(kShotRampSeconds),
+                                            Commands.run(this::applyLiveKnnShootingSetpoints, shooter)),
+                                    Commands.parallel(
+                                            Commands.run(this::applyLiveKnnShootingSetpoints, shooter),
+                                            intakeCommands.getFeedToShooterCommand()))
+                            .finallyDo(
+                                    () -> {
+                                        intake.stopHopper();
+                                        shooter.stopShooter();
+                                        shooter.stowHoodAndSyncDashboardAfterProfile();
+                                        shooter.setDashboardSetpointControlEnabled(true);
+                                    })
                             .withName("KNN held shot (inferred)");
                 },
                 Set.of(shooter, intake));
@@ -334,17 +447,39 @@ public class RobotContainer {
         // Reset field-centric heading (matches example: left bumper only).
         joystick.leftBumper().onTrue(drivetrain.runOnce(drivetrain::seedFieldCentric));
 
-        // Supplier + defer inside pathfindToPoseSlow uses a fresh robot pose when the command starts;
-        // teleop-only avoids competing with autonomous. Slow constraints keep the path conservative.
+        // Hold: translate with left stick; rotate toward hub bearing + distance-scaled offset (DriveConstants).
         joystick.rightBumper()
                 .and(new Trigger(DriverStation::isTeleopEnabled))
-                .onTrue(
-                        drivetrain
-                                .pathfindToPoseSlow(() -> kDriverRightBumperWaypoint)
-                                .andThen(drivetrain.applyRequest(() -> brake))
-                                .withName("Pathfind waypoint (slow)"));
+                .whileTrue(
+                        drivetrain.applyRequest(
+                                () -> {
+                                    var pose = drivetrain.getState().Pose;
+                                    double offsetDeg = hubAlignCalibration.getScaledOffsetDeg(pose);
+                                    return driveHubAlign
+                                            .withVelocityX(-joystick.getLeftY() * MaxSpeed)
+                                            .withVelocityY(-joystick.getLeftX() * MaxSpeed)
+                                            .withRotationalRate(
+                                                    DriveConstants.teleopOmegaTowardHub(
+                                                            pose, offsetDeg));
+                                })
+                                .withName("Hub align (hold)"));
 
-        // R3 (driver): apply current KNN interpolated RPM setpoint once (hood tracks separately when KnnConstants allows).
+        // L3 (left stick press): at correct aim, record offset vs shot-map hub heading at this distance (see Hub Align/*).
+        joystick.leftStick()
+                .and(new Trigger(DriverStation::isTeleopEnabled))
+                .onTrue(
+                        Commands.runOnce(
+                                () ->
+                                        hubAlignCalibration.recordAtCurrentPose(
+                                                drivetrain.getState().Pose)));
+
+        // Start + L3: clear hub-offset calibration.
+        joystick.start()
+                .and(joystick.leftStick())
+                .and(new Trigger(DriverStation::isTeleopEnabled))
+                .onTrue(Commands.runOnce(hubAlignCalibration::clear));
+
+        // R3 (driver): snap hood smoothing and apply smoothed IDW hood + RPM once.
         joystick.rightStick()
                 .and(new Trigger(DriverStation::isTeleopEnabled))
                 .onTrue(
@@ -353,7 +488,12 @@ public class RobotContainer {
                                     if (knnInterpreter.getMapSize() == 0) {
                                         return;
                                     }
+                                    knnInterpreter.update(drivetrain.getState().Pose);
+                                    knnInterpreter.snapSmoothedHoodToInterpolated();
+                                    knnInterpreter.snapSmoothedRpmToInterpolated();
+                                    shooter.clearKnnHoodManualTuneBlock();
                                     shooter.setDashboardSetpointControlEnabled(false);
+                                    shooter.setHoodAngle(knnInterpreter.getSmoothedInterpolatedHoodDeg());
                                     shooter.setShooterRpm(knnInterpreter.getInterpolatedRpm());
                                 },
                                 shooter));
@@ -382,8 +522,9 @@ public class RobotContainer {
         subsystems.x().whileTrue(intakeCommands.getPivotTowardCollectManualCommand());
         subsystems.start().and(subsystems.y()).onTrue(intakeCommands.getPivotHomingCommand());
 
-        subsystems.povUp().onTrue(shooterCommands.getIncrementHoodDegreesCommand());
-        subsystems.povDown().onTrue(shooterCommands.getDecrementHoodDegreesCommand());
+        // D-pad: hood angle (while held = repeat); latch keeps setpoint after release vs stow-at-min.
+        subsystems.povUp().whileTrue(shooterCommands.getAdjustHoodUpWhileHeldCommand());
+        subsystems.povDown().whileTrue(shooterCommands.getAdjustHoodDownWhileHeldCommand());
         subsystems.povLeft().onTrue(shooterCommands.getDecrementShooterRpmCommand());
         subsystems.povRight().onTrue(shooterCommands.getIncrementShooterRpmCommand());
 
@@ -394,19 +535,21 @@ public class RobotContainer {
     }
 
     /**
-     * When {@link KnnConstants#kInterpolateHoodWhileDriving} is true, continuously sets hood angle from IDW
-     * of the nearest map points while driving. Shooter RPM is not driven here — use driver R3 to apply
-     * {@link KnnInterpreter#getInterpolatedRpm()} once, or use shot buttons. Skips hood updates while
-     * another command is using the shooter, or while dashboard ownership is off (e.g. during a shot profile).
-     * Re-enable dashboard slider ownership when the constant is false.
-     * Call from {@code Robot.robotPeriodic} after {@code CommandScheduler.run()}.
+     * When {@link frc.robot.knn.KnnConstants#kInterpolateHoodWhileDriving} is true, sets hood from smoothed IDW
+     * each loop after commands, unless the operator moved the hood manually (subsystem POV); then skips until
+     * {@link ShooterSubsystem#clearKnnHoodManualTuneBlock()} runs from a shot or R3 snap. Skips while another
+     * command requires the shooter. Re-enable dashboard slider ownership when interpolation turns off.
+     * Call from {@code Robot.robotPeriodic} after {@code CommandScheduler.run()}; then call
+     * {@link ShooterSubsystem#applyHoodMotorClosedLoopTick()}.
      */
     public void applyKnnHoodInterpolation() {
         boolean interp = knnInterpreter.isInterpolateEnabled() && knnInterpreter.getMapSize() > 0;
         if (interp) {
             if (CommandScheduler.getInstance().requiring(shooter) == null) {
                 shooter.setDashboardSetpointControlEnabled(false);
-                shooter.setHoodAngle(knnInterpreter.getInterpolatedHoodDeg());
+                if (!shooter.isKnnHoodBlockedAfterManualTune()) {
+                    shooter.setHoodAngle(knnInterpreter.getSmoothedInterpolatedHoodDeg());
+                }
             }
         } else if (knnInterpolationWasEnabled) {
             shooter.setDashboardSetpointControlEnabled(true);
@@ -429,6 +572,32 @@ public class RobotContainer {
         var hid = joystick.getHID();
         hid.setRumble(GenericHID.RumbleType.kLeftRumble, 0.0);
         hid.setRumble(GenericHID.RumbleType.kRightRumble, 0.0);
+    }
+
+    /** SmartDashboard {@code Hub Align/*} — offset, distance, scale (deg/m), heading error. */
+    public void publishHubAlignTelemetry() {
+        hubAlignCalibration.publishTelemetry(drivetrain.getState().Pose);
+    }
+
+    /**
+     * Before autonomous runs: reset fused odometry to the PathPlanner routine’s start pose when the selected
+     * command is a {@link PathPlannerAuto} with a defined start. Does not depend on Limelight or teleop so
+     * auto can run with wheel odometry only.
+     */
+    public void seedOdometryForAuto(Command selectedAuto) {
+        SmartDashboard.putBoolean("Auto/Pose seeded this enable", false);
+        Pose2d start = null;
+        if (selectedAuto instanceof PathPlannerAuto ppa) {
+            start = ppa.getStartingPose();
+        }
+        if (start == null) {
+            return;
+        }
+        drivetrain.resetPose(start);
+        SmartDashboard.putBoolean("Auto/Pose seeded this enable", true);
+        SmartDashboard.putNumber("Auto/Seed pose X (m)", start.getX());
+        SmartDashboard.putNumber("Auto/Seed pose Y (m)", start.getY());
+        SmartDashboard.putNumber("Auto/Seed pose heading (deg)", start.getRotation().getDegrees());
     }
 
     /** Same as SwerveWithPathPlanner: chooser selection only. */
@@ -455,5 +624,10 @@ public class RobotContainer {
     /** Intake pivot homing for real robot; schedule when enabling (auto or teleop). */
     public Command getPivotHomingCommand() {
         return intakeCommands.getPivotHomingCommand();
+    }
+
+    /** Intake pivot homing to collect (down) stop; encoder zero at deployed, like hood homing. */
+    public Command getPivotDownHomingCommand() {
+        return intakeCommands.getPivotDownHomingCommand();
     }
 }

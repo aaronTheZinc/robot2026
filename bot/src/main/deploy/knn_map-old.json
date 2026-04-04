@@ -1,0 +1,273 @@
+[
+  {
+    "x": 1.4993845768458223,
+    "y": 3.814938559774889,
+    "headingDeg": -3.5350885263207763,
+    "shooterRpm": 3700,
+    "hoodDeg": 0,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 1.4993845768458223,
+    "y": 3.814938559774889,
+    "headingDeg": -3.5350885263207763,
+    "shooterRpm": 3700,
+    "hoodDeg": 0,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 0.9961568681977497,
+    "y": 3.6262090930673816,
+    "headingDeg": -0.18789846317490771,
+    "shooterRpm": 3800,
+    "hoodDeg": 10,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 0.9961568681977497,
+    "y": 3.6262090930673816,
+    "headingDeg": -0.18789846317490771,
+    "shooterRpm": 3800,
+    "hoodDeg": 10,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 0.8514088317587694,
+    "y": 1.4968423879684514,
+    "headingDeg": 41.65002376972627,
+    "shooterRpm": 4100,
+    "hoodDeg": 15,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 0.5434893859035895,
+    "y": 0.7434487805835632,
+    "headingDeg": 48.32873262855065,
+    "shooterRpm": 4400,
+    "hoodDeg": 25,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 0.5434893859035895,
+    "y": 0.7434487805835632,
+    "headingDeg": 48.32873262855065,
+    "shooterRpm": 4400,
+    "hoodDeg": 25,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 2.547448819626423,
+    "y": 0.6333872218861922,
+    "headingDeg": 85.67455023503034,
+    "shooterRpm": 3900,
+    "hoodDeg": 15,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 0.30049849038147247,
+    "y": 5.472650629227539,
+    "headingDeg": -21.79196839776803,
+    "shooterRpm": 4100,
+    "hoodDeg": 10,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 0.30049849038147247,
+    "y": 5.472650629227539,
+    "headingDeg": -21.79196839776803,
+    "shooterRpm": 4100,
+    "hoodDeg": 10,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 0.30049849038147247,
+    "y": 5.472650629227539,
+    "headingDeg": -21.79196839776803,
+    "shooterRpm": 4100,
+    "hoodDeg": 10,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 2.5204865195078683,
+    "y": 7.200798997126131,
+    "headingDeg": -64.6892161375524,
+    "shooterRpm": 4000,
+    "hoodDeg": 15,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 2.5204865195078683,
+    "y": 7.200798997126131,
+    "headingDeg": -64.6892161375524,
+    "shooterRpm": 4000,
+    "hoodDeg": 15,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 0,
+    "y": 0,
+    "headingDeg": 0,
+    "shooterRpm": 0,
+    "hoodDeg": 0,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 0,
+    "y": 0,
+    "headingDeg": 0,
+    "shooterRpm": 0,
+    "hoodDeg": 0,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 1.5252545922668337,
+    "y": 2.152857441798107,
+    "headingDeg": 42.47905129655489,
+    "shooterRpm": 3500,
+    "hoodDeg": 0,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 9.118146473290244,
+    "y": 6.748165506949667,
+    "headingDeg": -167.85310611566283,
+    "shooterRpm": 3800,
+    "hoodDeg": 30,
+    "shootTarget": {
+      "kind": "field",
+      "x": 3.3442587533150974,
+      "y": 6.911584554123651,
+      "label": "Drop 1"
+    }
+  },
+  {
+    "x": 9.118146473290244,
+    "y": 6.748165506949667,
+    "headingDeg": -167.85310611566283,
+    "shooterRpm": 3800,
+    "hoodDeg": 30,
+    "shootTarget": {
+      "kind": "field",
+      "x": 3.3442587533150974,
+      "y": 6.911584554123651,
+      "label": "Drop 1"
+    }
+  },
+  {
+    "x": 11.77021157269546,
+    "y": 5.054612931768792,
+    "headingDeg": -173.20044814481022,
+    "shooterRpm": 4600,
+    "hoodDeg": 35,
+    "shootTarget": {
+      "kind": "field",
+      "x": 3.238678129588596,
+      "y": 5.760594917041688,
+      "label": "Drop 3"
+    }
+  },
+  {
+    "x": 11.77021157269546,
+    "y": 5.054612931768792,
+    "headingDeg": -173.20044814481022,
+    "shooterRpm": 4600,
+    "hoodDeg": 35,
+    "shootTarget": {
+      "kind": "field",
+      "x": 3.238678129588596,
+      "y": 5.760594917041688,
+      "label": "Drop 3"
+    }
+  },
+  {
+    "x": 9.246911282814786,
+    "y": 2.263968708910559,
+    "headingDeg": 174.60866459755147,
+    "shooterRpm": 3800,
+    "hoodDeg": 35,
+    "shootTarget": {
+      "kind": "field",
+      "x": 4.0394241804366615,
+      "y": 1.4654598051844507,
+      "label": "Drop 2"
+    }
+  },
+  {
+    "x": 9.246911282814786,
+    "y": 2.263968708910559,
+    "headingDeg": 174.60866459755147,
+    "shooterRpm": 3800,
+    "hoodDeg": 35,
+    "shootTarget": {
+      "kind": "field",
+      "x": 4.0394241804366615,
+      "y": 1.4654598051844507,
+      "label": "Drop 2"
+    }
+  },
+  {
+    "x": 9.246911282814786,
+    "y": 2.263968708910559,
+    "headingDeg": 174.60866459755147,
+    "shooterRpm": 3800,
+    "hoodDeg": 35,
+    "shootTarget": {
+      "kind": "field",
+      "x": 4.0394241804366615,
+      "y": 1.4654598051844507,
+      "label": "Drop 2"
+    }
+  },
+  {
+    "x": 0.1602565460626797,
+    "y": 6.934962852180538,
+    "headingDeg": -38.29514225932544,
+    "shooterRpm": 4200,
+    "hoodDeg": 40,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  },
+  {
+    "x": 0.1602565460626797,
+    "y": 6.934962852180538,
+    "headingDeg": -38.29514225932544,
+    "shooterRpm": 4200,
+    "hoodDeg": 40,
+    "shootTarget": {
+      "kind": "hub"
+    }
+  }
+]

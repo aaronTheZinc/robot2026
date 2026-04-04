@@ -25,6 +25,13 @@ public class IntakeCommands {
         return Commands.runOnce(intake::stopHopper, intake);
     }
 
+    /**
+     * Run intake roller inward until interrupted (PathPlanner event end); stops roller on end.
+     */
+    public Command getRollerIntakeHoldCommand() {
+        return Commands.run(intake::runRollerIntake, intake).finallyDo(intake::stopRoller);
+    }
+
     public Command getPivotTowardStowManualCommand() {
         return Commands.run(intake::setPivotTowardStow, intake)
                 .finallyDo(intake::stopPivot);
@@ -64,6 +71,35 @@ public class IntakeCommands {
     }
 
     /**
+     * Home pivot toward collect (down) until mechanical stop (stall current), then zero encoder and mark ready.
+     * Same pattern as {@link frc.robot.commands.ShooterCommands#getHoodHomingCommand()}: relative position is 0 at
+     * the down stop; {@link frc.robot.subsystems.IntakeSubsystem#isPivotStowed()} is false. Has safety timeout.
+     */
+    public Command getPivotDownHomingCommand() {
+        int[] stallCount = {0};
+
+        Command runToStall = Commands.sequence(
+                Commands.runOnce(() -> stallCount[0] = 0, intake),
+                Commands.run(() -> {
+                    intake.setPivotTowardCollectHoming();
+                    double current = Math.abs(intake.getPivotOutputCurrentAmps());
+                    stallCount[0] = current >= IntakeConstants.kPivotStallCurrentAmps
+                            ? stallCount[0] + 1
+                            : 0;
+                }, intake).until(() -> stallCount[0] >= IntakeConstants.kPivotStallConfirmCycles),
+                Commands.runOnce(() -> {
+                    intake.zeroPivotPosition();
+                    intake.setPivotReady(true);
+                    intake.setPivotStowed(false);
+                }, intake));
+
+        return Commands.race(
+                runToStall,
+                Commands.waitSeconds(IntakeConstants.kPivotStallTimeoutSeconds))
+                .finallyDo(intake::stopPivot);
+    }
+
+    /**
      * Run pivot toward stow until mechanical stop. No-op if not homed yet. Has safety timeout.
      */
     public Command getPivotToStowCommand() {
@@ -90,27 +126,21 @@ public class IntakeCommands {
     }
 
     /**
-     * Run pivot toward collect until mechanical stop. No-op if not homed yet. Has safety timeout.
+     * Run pivot toward collect until {@link IntakeSubsystem#isPivotAtDownPosition()} is true. No-op if not homed
+     * yet. Has safety timeout if the encoder never reaches the down band.
      */
     public Command getPivotToCollectCommand() {
         if (!intake.isPivotReady()) {
             return Commands.none();
         }
-        int[] stallCount = {0};
 
-        Command runToStall = Commands.sequence(
-                Commands.runOnce(() -> stallCount[0] = 0, intake),
-                Commands.run(() -> {
-                    intake.setPivotTowardCollect();
-                    double current = Math.abs(intake.getPivotOutputCurrentAmps());
-                    stallCount[0] = current >= IntakeConstants.kPivotStallCurrentAmps
-                            ? stallCount[0] + 1
-                            : 0;
-                }, intake).until(() -> stallCount[0] >= IntakeConstants.kPivotStallConfirmCycles),
+        Command runToDown = Commands.sequence(
+                Commands.run(intake::setPivotTowardCollect, intake).until(intake::isPivotAtDownPosition),
+                Commands.runOnce(intake::stopPivot, intake),
                 Commands.runOnce(() -> intake.setPivotStowed(false), intake));
 
         return Commands.race(
-                runToStall,
+                runToDown,
                 Commands.waitSeconds(IntakeConstants.kPivotStallTimeoutSeconds))
                 .finallyDo(intake::stopPivot);
     }
