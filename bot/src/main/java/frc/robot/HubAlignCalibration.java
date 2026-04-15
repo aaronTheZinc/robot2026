@@ -24,8 +24,8 @@ public final class HubAlignCalibration {
 
     /** Straight-line distance from robot to field hub (m). */
     public static double distanceToHubMeters(Pose2d pose) {
-        double dx = DriveConstants.kHubFieldXMeters - pose.getX();
-        double dy = DriveConstants.kHubFieldYMeters - pose.getY();
+        double dx = DriveConstants.hubTargetXMeters() - pose.getX();
+        double dy = DriveConstants.hubTargetYMeters() - pose.getY();
         return Math.hypot(dx, dy);
     }
 
@@ -72,8 +72,7 @@ public final class HubAlignCalibration {
     public void publishTelemetry(Pose2d pose) {
         double d = distanceToHubMeters(pose);
         double offsetApplied = getScaledOffsetDeg(pose);
-        Rotation2d target =
-                DriveConstants.rotationToFaceHubFromShotMap(pose).plus(Rotation2d.fromDegrees(offsetApplied));
+        Rotation2d target = DriveConstants.rotationToFaceHubForShooting(pose, offsetApplied);
         double errRad =
                 MathUtil.angleModulus(
                         target.getRadians() - pose.getRotation().getRadians());

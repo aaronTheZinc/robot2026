@@ -11,6 +11,8 @@ import edu.wpi.first.networktables.DoublePublisher;
 import edu.wpi.first.networktables.IntegerPublisher;
 import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.Filesystem;
 import edu.wpi.first.wpilibj.Timer;
 
@@ -30,7 +32,9 @@ import frc.robot.ShooterConstants;
 
 /**
  * Loads {@code deploy/knn_map.json}, finds the nearest map point to the robot pose, and publishes
- * inverse-distance-weighted (IDW) shooter RPM and hood. Map rows with non-positive RPM are dropped; nearby
+ * inverse-distance-weighted (IDW) shooter RPM and hood. On red alliance, optional Y-mirror
+ * ({@link KnnConstants#kMirrorPoseYForRedAllianceKnnLookup}) maps symmetric field positions into the
+ * same frame as blue-recorded points — not Limelight WPIRed. Map rows with non-positive RPM are dropped; nearby
  * duplicate positions are merged (average). Outputs are clamped to the map's hood/RPM envelope, blended toward
  * the nearest row when far from data ({@link KnnConstants#kIdwBlendFullNeighborBeyondM}), then slewed with
  * {@link KnnConstants#kHoodInterpMaxRateDegPerSec} / {@link KnnConstants#kShooterRpmInterpMaxRatePerSec}.
@@ -38,11 +42,16 @@ import frc.robot.ShooterConstants;
  *
  * <p>NetworkTables (table {@code KNN}):
  * <ul>
- *   <li>{@code selectedIndex} — nearest point index, or -1
+ *   <li>{@code selectedIndex} — index into the loaded map list (same order as {@code deploy/knn_map.json} rows), or
+ *       -1; after {@link #findStableNearestIndex} hysteresis. Matches dashboard table row / sim highlight when lists
+ *       align.
  *   <li>{@code interpolateHoodEnabled} — mirrors {@link KnnConstants#kInterpolateHoodWhileDriving} (read-only)
  *   <li>{@code nearestShooterRpm}, {@code nearestHoodDeg} — from the single nearest point
  *   <li>{@code interpolatedShooterRpm}, {@code interpolatedHoodDeg} — raw IDW blend from {@link KnnConstants#kIdwNearestCount}
  *       nearest points (pre-slew target); {@code smoothedHoodDeg} / {@code smoothedShooterRpm} are what the robot uses
+ *   <li>{@code nearestIndexBlue}, {@code nearestIndexRed} — geometric nearest map row for raw pose vs Y-mirrored pose
+ *       (see {@link #mirrorPoseYForRedLookup}); both are published so the dashboard can show red vs blue inference
+ *       for the same robot position.
  * </ul>
  */
 public class KnnInterpreter {
@@ -59,6 +68,10 @@ public class KnnInterpreter {
     private final DoublePublisher interpolatedHoodPub;
     private final DoublePublisher smoothedHoodPub;
     private final DoublePublisher smoothedRpmPub;
+    /** Geometric nearest map index using raw WPIBlue pose (no alliance mirror). */
+    private final IntegerPublisher nearestIndexBluePub;
+    /** Geometric nearest map index using Y-mirrored pose {@code y' = W - y} (red-side lookup frame). */
+    private final IntegerPublisher nearestIndexRedPub;
 
     private int lastSelectedIndex = -1;
     private double lastNearestRpm = ShooterConstants.kLeftBumperShotRpm;
@@ -89,6 +102,8 @@ public class KnnInterpreter {
         interpolatedHoodPub = table.getDoubleTopic("interpolatedHoodDeg").publish();
         smoothedHoodPub = table.getDoubleTopic("smoothedHoodDeg").publish();
         smoothedRpmPub = table.getDoubleTopic("smoothedShooterRpm").publish();
+        nearestIndexBluePub = table.getIntegerTopic("nearestIndexBlue").publish();
+        nearestIndexRedPub = table.getIntegerTopic("nearestIndexRed").publish();
         loadMap();
         interpolateHoodEnabledPub.set(KnnConstants.kInterpolateHoodWhileDriving);
     }
@@ -406,25 +421,57 @@ public class KnnInterpreter {
         nearestHoodPub.set(lastNearestHood);
     }
 
-    private void refreshForPose(Pose2d pose) {
+    /**
+     * @param fusedFieldPose robot pose in WPIBlue field coordinates (not pre-mirrored)
+     */
+    private void refreshForPose(Pose2d fusedFieldPose) {
         interpolateHoodEnabledPub.set(KnnConstants.kInterpolateHoodWhileDriving);
-        int best = findStableNearestIndex(pose);
+        Pose2d lookupPose = poseForKnnLookup(fusedFieldPose);
+        int best = findStableNearestIndex(lookupPose);
         publishSelection(best);
-        computeInterpolated(pose);
+        computeInterpolated(lookupPose);
         updateSmoothedHood();
         updateSmoothedRpm();
         interpolatedRpmPub.set(lastInterpolatedRpm);
         interpolatedHoodPub.set(lastInterpolatedHood);
         smoothedHoodPub.set(smoothedHoodDeg);
         smoothedRpmPub.set(smoothedRpm);
+
+        int idxBlue = points.isEmpty() ? -1 : findNearestIndex(fusedFieldPose);
+        int idxRed =
+                points.isEmpty()
+                        ? -1
+                        : findNearestIndex(mirrorPoseYForRedLookup(fusedFieldPose));
+        nearestIndexBluePub.set(idxBlue);
+        nearestIndexRedPub.set(idxRed);
+    }
+
+    private static Pose2d mirrorPoseYForRedLookup(Pose2d fused) {
+        double w = KnnConstants.kFieldWidthYMeters;
+        return new Pose2d(fused.getX(), w - fused.getY(), fused.getRotation());
     }
 
     /**
      * Updates nearest-index tracking and IDW hood / RPM for the current pose. Call once per loop with the
-     * fused field pose.
+     * fused field pose (WPIBlue global frame).
      */
     public void update(Pose2d pose) {
         refreshForPose(pose);
+    }
+
+    /**
+     * Red alliance: mirror Y across field width so distance to blue-recorded map rows matches symmetric
+     * red-side shots ({@code y' = W - y}, {@link KnnConstants#kFieldWidthYMeters}). Blue / no alliance: identity.
+     */
+    private static Pose2d poseForKnnLookup(Pose2d fused) {
+        if (!KnnConstants.kMirrorPoseYForRedAllianceKnnLookup) {
+            return fused;
+        }
+        if (DriverStation.getAlliance().orElse(Alliance.Blue) != Alliance.Red) {
+            return fused;
+        }
+        double w = KnnConstants.kFieldWidthYMeters;
+        return new Pose2d(fused.getX(), w - fused.getY(), fused.getRotation());
     }
 
     /**

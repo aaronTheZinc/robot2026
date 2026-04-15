@@ -1,3 +1,4 @@
+import AutoPathPreview from './AutoPathPreview';
 import type { RobotState } from '../lib/robotState';
 
 type Props = {
@@ -35,6 +36,7 @@ export default function AutoDebugPanel({ connected, nt4Enabled, mode, state, onS
             <code>PathFollower/*</code> from the robot.
           </p>
         )}
+        <AutoPathPreview />
         {show && (
           <>
             <div className="control-row" style={{ marginBottom: '0.75rem' }}>

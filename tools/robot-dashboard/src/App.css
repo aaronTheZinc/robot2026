@@ -1442,6 +1442,10 @@
   font-weight: 600;
 }
 
+.knn-points-table .knn-row-nt-selected {
+  box-shadow: inset 3px 0 0 rgba(250, 204, 21, 0.9);
+}
+
 .knn-points-table tbody tr:hover {
   background: rgba(42, 58, 92, 0.3);
 }

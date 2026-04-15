@@ -57,11 +57,11 @@ public final class IntakeConstants {
 
     // ----- Pivot stop-based control (mechanical stops, no encoder setpoints) -----
     /** Normalized speed [-1, 1] for homing toward stow (init / Y+B); keep slow for safety. */
-    public static final double kPivotHomingSpeed = 0.2;
+    public static final double kPivotHomingSpeed = 0.6;
     /** Normalized speed [-1, 1] for homing toward collect (down) until stall; keep slow for safety. */
     public static final double kPivotCollectHomingSpeed = 0.2;
     /** Normalized speed [-1, 1] for pivot moving toward stow (up). */
-    public static final double kPivotStowSpeed = -0.2;
+    public static final double kPivotStowSpeed = -0.6;
     /** Normalized speed [-1, 1] for pivot moving toward collect (down). */
     public static final double kPivotCollectSpeed = 0.2;
     /** Output current (A) above which pivot is considered at mechanical stop. */

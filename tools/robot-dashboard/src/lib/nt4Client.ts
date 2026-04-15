@@ -67,6 +67,29 @@ const DEFAULT_TOPICS: TopicConfig[] = [
       typeof value === 'string' ? { lock: { targetLabel: value } } : null,
   },
   {
+    path: '/FMSInfo/IsRedAlliance',
+    type: NetworkTablesTypeInfos.kBoolean,
+    defaultValue: false,
+    map: (value) =>
+      typeof value === 'boolean' ? { driverStation: { isRedAlliance: value } } : null,
+  },
+  {
+    path: '/FMSInfo/StationNumber',
+    type: NetworkTablesTypeInfos.kInteger,
+    defaultValue: 0,
+    map: (value) => {
+      if (typeof value !== 'number') {
+        return null;
+      }
+      const n = Math.floor(value);
+      return {
+        driverStation: {
+          stationNumber: n >= 1 && n <= 3 ? n : null,
+        },
+      };
+    },
+  },
+  {
     path: '/Pose/robotPose',
     type: NetworkTablesTypeInfos.kDoubleArray,
     defaultValue: [0, 0, 0],
@@ -109,6 +132,11 @@ const DEFAULT_TOPICS: TopicConfig[] = [
         return null;
       }
       return {
+        limelightPose: {
+          x: Number(value[0]) || 0,
+          y: Number(value[1]) || 0,
+          headingDeg: Number(value[2]) || 0,
+        },
         visionPose: {
           x: Number(value[0]) || 0,
           y: Number(value[1]) || 0,
@@ -122,7 +150,50 @@ const DEFAULT_TOPICS: TopicConfig[] = [
     type: NetworkTablesTypeInfos.kBoolean,
     defaultValue: false,
     map: (value) =>
-      typeof value === 'boolean' ? { visionPose: { valid: value } } : null,
+      typeof value === 'boolean'
+        ? {
+            visionPose: { valid: value },
+            limelightPose: { valid: value },
+          }
+        : null,
+  },
+  {
+    path: '/Pose/limelightHasLock',
+    type: NetworkTablesTypeInfos.kBoolean,
+    defaultValue: false,
+    map: (value) =>
+      typeof value === 'boolean' ? { limelightPose: { hasLock: value } } : null,
+  },
+  {
+    path: '/Pose/limelightFrontEstimatedPose',
+    type: NetworkTablesTypeInfos.kDoubleArray,
+    defaultValue: [0, 0, 0],
+    map: (value) => {
+      if (!Array.isArray(value) || value.length < 3) {
+        return null;
+      }
+      return {
+        limelightFrontPose: {
+          x: Number(value[0]) || 0,
+          y: Number(value[1]) || 0,
+          headingDeg: Number(value[2]) || 0,
+        },
+      };
+    },
+  },
+  {
+    path: '/Pose/limelightFrontEstimatedPoseValid',
+    type: NetworkTablesTypeInfos.kBoolean,
+    defaultValue: false,
+    map: (value) =>
+      typeof value === 'boolean' ? { limelightFrontPose: { valid: value } } : null,
+  },
+  {
+    path: '/Pose/limelightFrontHasLock',
+    type: NetworkTablesTypeInfos.kBoolean,
+    defaultValue: false,
+    map: (value) =>
+      typeof value === 'boolean' ? { limelightFrontPose: { hasLock: value } } : null,
   },
   {
     path: '/Swerve/fieldRelative',
@@ -286,6 +357,24 @@ const DEFAULT_TOPICS: TopicConfig[] = [
     map: (value) =>
       typeof value === 'number'
         ? { knnSelectedIndex: Math.floor(value) }
+        : null,
+  },
+  {
+    path: '/KNN/nearestIndexBlue',
+    type: NetworkTablesTypeInfos.kInteger,
+    defaultValue: -1,
+    map: (value) =>
+      typeof value === 'number'
+        ? { knnNearestIndexBlue: Math.floor(value) }
+        : null,
+  },
+  {
+    path: '/KNN/nearestIndexRed',
+    type: NetworkTablesTypeInfos.kInteger,
+    defaultValue: -1,
+    map: (value) =>
+      typeof value === 'number'
+        ? { knnNearestIndexRed: Math.floor(value) }
         : null,
   },
   {

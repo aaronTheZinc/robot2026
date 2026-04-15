@@ -52,6 +52,20 @@ export type RobotState = {
     y: number;
     headingDeg: number;
   };
+  limelightPose: {
+    valid: boolean;
+    hasLock: boolean;
+    x: number;
+    y: number;
+    headingDeg: number;
+  };
+  limelightFrontPose: {
+    valid: boolean;
+    hasLock: boolean;
+    x: number;
+    y: number;
+    headingDeg: number;
+  };
   /** Hub aim debug: XY from odometry; heading = shot-map hub facing (NT Pose/idealShooterPose) */
   idealShooterPose: {
     x: number;
@@ -61,6 +75,17 @@ export type RobotState = {
   targets: { x: number; y: number }[];
   /** Robot KNN selected point index from NT /KNN/selectedIndex, or -1 if not set */
   knnSelectedIndex: number;
+  /** Geometric nearest map index for raw WPIBlue pose — /KNN/nearestIndexBlue */
+  knnNearestIndexBlue: number;
+  /** Geometric nearest map index for Y-mirrored pose — /KNN/nearestIndexRed */
+  knnNearestIndexRed: number;
+  /** From WPILib {@code FMSInfo} over NT when connected (driver station / FMS). */
+  driverStation: {
+    /** Mirrors {@code FMSInfo/IsRedAlliance}; default false (blue) when mock or offline. */
+    isRedAlliance: boolean;
+    /** {@code FMSInfo/StationNumber}: 1–3 within the alliance wall, or null if unknown. */
+    stationNumber: number | null;
+  };
   /** PathPlanner / autonomous diagnostics from NT (see AutoDiagnostics.java) */
   autoDebug: {
     availableAutos: string[];
@@ -115,9 +140,14 @@ export type RobotStateUpdate = {
   shooter?: Partial<RobotState['shooter']>;
   turret?: Partial<RobotState['turret']>;
   visionPose?: Partial<RobotState['visionPose']>;
+  limelightPose?: Partial<RobotState['limelightPose']>;
+  limelightFrontPose?: Partial<RobotState['limelightFrontPose']>;
   idealShooterPose?: Partial<RobotState['idealShooterPose']>;
   targets?: RobotState['targets'];
   knnSelectedIndex?: number;
+  knnNearestIndexBlue?: number;
+  knnNearestIndexRed?: number;
+  driverStation?: Partial<RobotState['driverStation']>;
   autoDebug?: Partial<RobotState['autoDebug']>;
 };
 
@@ -180,6 +210,20 @@ export function createInitialRobotState(mode: RobotMode): RobotState {
       y: 0,
       headingDeg: 0,
     },
+    limelightPose: {
+      valid: false,
+      hasLock: false,
+      x: 0,
+      y: 0,
+      headingDeg: 0,
+    },
+    limelightFrontPose: {
+      valid: false,
+      hasLock: false,
+      x: 0,
+      y: 0,
+      headingDeg: 0,
+    },
     idealShooterPose: {
       x: 0,
       y: 0,
@@ -187,6 +231,12 @@ export function createInitialRobotState(mode: RobotMode): RobotState {
     },
     targets: [],
     knnSelectedIndex: -1,
+    knnNearestIndexBlue: -1,
+    knnNearestIndexRed: -1,
+    driverStation: {
+      isRedAlliance: false,
+      stationNumber: null,
+    },
     autoDebug: {
       availableAutos: [],
       chooserSelected: '',
@@ -242,12 +292,23 @@ export function applyRobotStateUpdate(
     shooter: { ...prev.shooter, ...update.shooter },
     turret: { ...prev.turret, ...update.turret },
     visionPose: { ...prev.visionPose, ...update.visionPose },
+    limelightPose: { ...prev.limelightPose, ...update.limelightPose },
+    limelightFrontPose: { ...prev.limelightFrontPose, ...update.limelightFrontPose },
     idealShooterPose: { ...prev.idealShooterPose, ...update.idealShooterPose },
     targets: update.targets !== undefined ? update.targets : prev.targets,
     knnSelectedIndex:
       update.knnSelectedIndex !== undefined
         ? update.knnSelectedIndex
         : prev.knnSelectedIndex,
+    knnNearestIndexBlue:
+      update.knnNearestIndexBlue !== undefined
+        ? update.knnNearestIndexBlue
+        : prev.knnNearestIndexBlue,
+    knnNearestIndexRed:
+      update.knnNearestIndexRed !== undefined
+        ? update.knnNearestIndexRed
+        : prev.knnNearestIndexRed,
+    driverStation: { ...prev.driverStation, ...update.driverStation },
     autoDebug: { ...prev.autoDebug, ...update.autoDebug },
     lastUpdateMs: timestampMs,
   };

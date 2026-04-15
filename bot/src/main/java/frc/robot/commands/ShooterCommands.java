@@ -13,40 +13,46 @@ public class ShooterCommands {
     }
 
     public Command getIncrementHoodDegreesCommand() {
-        return Commands.runOnce(shooter::incrementHoodDegrees, shooter);
+        // No subsystem requirement: requiring shooter would spin flywheels in periodic() during tuning.
+        return Commands.runOnce(shooter::incrementHoodDegrees);
     }
 
     public Command getDecrementHoodDegreesCommand() {
-        return Commands.runOnce(shooter::decrementHoodDegrees, shooter);
+        return Commands.runOnce(shooter::decrementHoodDegrees);
     }
 
     /** Subsystem controller POV up: step hood up every {@link ShooterConstants#kHoodPovRepeatDelaySeconds} while held. */
     public Command getAdjustHoodUpWhileHeldCommand() {
         return Commands.repeatingSequence(
-                Commands.runOnce(shooter::incrementHoodDegrees, shooter),
+                Commands.runOnce(shooter::incrementHoodDegrees),
                 Commands.waitSeconds(ShooterConstants.kHoodPovRepeatDelaySeconds));
     }
 
     /** Subsystem controller POV down: step hood down every {@link ShooterConstants#kHoodPovRepeatDelaySeconds} while held. */
     public Command getAdjustHoodDownWhileHeldCommand() {
         return Commands.repeatingSequence(
-                Commands.runOnce(shooter::decrementHoodDegrees, shooter),
+                Commands.runOnce(shooter::decrementHoodDegrees),
                 Commands.waitSeconds(ShooterConstants.kHoodPovRepeatDelaySeconds));
     }
 
     public Command getIncrementShooterRpmCommand() {
-        return Commands.runOnce(shooter::incrementShooterRpm, shooter);
+        return Commands.runOnce(shooter::incrementShooterRpm);
     }
 
     public Command getDecrementShooterRpmCommand() {
-        return Commands.runOnce(shooter::decrementShooterRpm, shooter);
+        return Commands.runOnce(shooter::decrementShooterRpm);
     }
 
     public Command getRunShooterCommand() {
         return Commands.run(
                 () -> shooter.setShooterRpm(shooter.getShooterRpmSetpoint()),
                 shooter)
-                .finallyDo(shooter::stopShooter);
+                .beforeStarting(() -> shooter.setShootFlywheelVelocityEnabled(true))
+                .finallyDo(
+                        () -> {
+                            shooter.stopShooter();
+                            shooter.setShootFlywheelVelocityEnabled(false);
+                        });
     }
 
     /**
@@ -61,17 +67,20 @@ public class ShooterCommands {
                             shooter.setShooterRpm(rpm);
                         },
                         shooter)
-                .beforeStarting(shooter::clearKnnHoodManualTuneBlock);
+                .beforeStarting(
+                        () -> {
+                            shooter.setShootFlywheelVelocityEnabled(true);
+                        });
     }
 
-    /** Runs hood + closed-loop shooter at the given profile until interrupted; stows on end. */
+    /** Runs hood + closed-loop shooter at the given profile until interrupted; stops wheels and leaves hood for KNN. */
     public Command getRunShotProfileCommand(double hoodAngleDeg, double rpm) {
         return getRunShotProfileHoldCommand(hoodAngleDeg, rpm)
                 .finallyDo(
                         () -> {
                             shooter.stopShooter();
-                            shooter.stowHoodAndSyncDashboardAfterProfile();
-                            shooter.setDashboardSetpointControlEnabled(true);
+                            shooter.setShootFlywheelVelocityEnabled(false);
+                            shooter.setDashboardSetpointControlEnabled(false);
                         });
     }
 
@@ -88,8 +97,7 @@ public class ShooterCommands {
     }
 
     /**
-     * Teleop B ramp/feed segments: manual hood + RPM only — does not clear the KNN hood block (inferred hood must not
-     * win during scheduler gaps). Sequence {@code finallyDo} clears after the shot.
+     * Teleop B ramp/feed segments: manual hood + RPM setpoints; parent sequence enables flywheel velocity.
      */
     public Command getRunWingShotWithManualHoldCommand() {
         return Commands.run(
@@ -106,12 +114,12 @@ public class ShooterCommands {
      */
     public Command getRunWingShotWithManualRpmCommand() {
         return getRunWingShotWithManualHoldCommand()
+                .beforeStarting(() -> shooter.setShootFlywheelVelocityEnabled(true))
                 .finallyDo(
                         () -> {
                             shooter.stopShooter();
-                            shooter.stowHoodAndSyncDashboardAfterProfile();
-                            shooter.setDashboardSetpointControlEnabled(true);
-                            shooter.clearKnnHoodManualTuneBlock();
+                            shooter.setShootFlywheelVelocityEnabled(false);
+                            shooter.setDashboardSetpointControlEnabled(false);
                         });
     }
 

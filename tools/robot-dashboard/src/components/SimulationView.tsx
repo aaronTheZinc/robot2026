@@ -6,7 +6,12 @@ import {
   GEAR_RATIO,
 } from '../lib/turretModel';
 import type { TurretMeshRefs } from '../lib/turretModel';
-import type { KnnPoint, KnnShootTarget } from '../lib/knnInference';
+import {
+  inferKnn,
+  knnMapPointFieldYForAlliance,
+  type KnnPoint,
+  type KnnShootTarget,
+} from '../lib/knnInference';
 import {
   distanceBetweenFieldPointsM,
   HUB_FIELD_X_M,
@@ -31,6 +36,11 @@ import {
   fieldPoseToWorldXZ,
   rayNdcToFieldXY,
 } from '../lib/simFieldToThree';
+import {
+  flipFieldHeadingDegRotational,
+  flipFieldPositionRotational,
+  type FieldSize,
+} from '../lib/pathPlannerFlip';
 import { useDraggablePanel } from '../lib/useDraggablePanel';
 
 type SimulationViewProps = {
@@ -38,16 +48,43 @@ type SimulationViewProps = {
   fieldWidthM: number;
   robotLengthM: number;
   robotWidthM: number;
+  /**
+   * When true, the field (and all field-space visuals) are rotated 180° so the sim matches the red
+   * driver station perspective; driven from NT {@code FMSInfo/IsRedAlliance} when connected.
+   */
+  viewAsRedAlliance: boolean;
+  /** {@code FMSInfo/StationNumber} (1–3), or null */
+  driverStationStationNumber: number | null;
   poseX: number;
   poseY: number;
   headingDeg: number;
+  limelightPoseX?: number;
+  limelightPoseY?: number;
+  limelightHeadingDeg?: number;
+  limelightPoseVisible?: boolean;
+  limelightHasLock?: boolean;
+  limelightFrontPoseX?: number;
+  limelightFrontPoseY?: number;
+  limelightFrontHeadingDeg?: number;
+  limelightFrontPoseVisible?: boolean;
+  limelightFrontHasLock?: boolean;
+  idealShooterPoseX?: number;
+  idealShooterPoseY?: number;
+  idealShooterHeadingDeg?: number;
+  idealShooterPoseVisible?: boolean;
   turretAngleDeg: number;
   hoodPitchDeg: number;
   velocityMps: number;
   /** Logged / deploy KNN shot samples (same indices as robot `knn_map.json` when lists match). */
   shotMapPoints: KnnPoint[];
+  /** Match robot KNN Y-mirror on red ({@code FMSInfo/IsRedAlliance}). */
+  isRedAlliance: boolean;
   /** `/KNN/selectedIndex` from robot, or -1 when unknown */
   knnSelectedIndex: number;
+  /** `/KNN/nearestIndexBlue` — raw WPIBlue pose nearest map row */
+  knnNearestIndexBlue: number;
+  /** `/KNN/nearestIndexRed` — Y-mirrored pose nearest map row */
+  knnNearestIndexRed: number;
   connected: boolean;
   swerveSpeedMps: number;
   shooterRpm: number;
@@ -92,16 +129,219 @@ function isPlaceholderKnnPoint(p: KnnPoint): boolean {
 
 function disposeObject3DSubtree(root: THREE.Object3D) {
   root.traverse((obj) => {
-    if (obj instanceof THREE.Mesh) {
-      obj.geometry?.dispose();
-      const mat = obj.material;
+    const maybeWithGeometry = obj as THREE.Object3D & {
+      geometry?: THREE.BufferGeometry;
+      material?: THREE.Material | THREE.Material[];
+    };
+    maybeWithGeometry.geometry?.dispose();
+    const mat = maybeWithGeometry.material;
+    if (mat) {
       if (Array.isArray(mat)) {
         mat.forEach((m) => m.dispose());
       } else {
-        mat?.dispose();
+        mat.dispose();
       }
     }
   });
+}
+
+function createPhantomPoseGhost(
+  robotLengthM: number,
+  robotWidthM: number,
+  color: number,
+  opacity: number
+): THREE.Group {
+  const group = new THREE.Group();
+  const bodyHeightM = ROBOT_HEIGHT_M * 0.82;
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(robotLengthM, bodyHeightM, robotWidthM),
+    new THREE.MeshStandardMaterial({
+      color,
+      transparent: true,
+      opacity,
+      metalness: 0.12,
+      roughness: 0.52,
+      emissive: color,
+      emissiveIntensity: 0.08,
+      depthWrite: false,
+    })
+  );
+  body.position.y = bodyHeightM / 2 + 0.015;
+  group.add(body);
+
+  const arrow = new THREE.ArrowHelper(
+    new THREE.Vector3(1, 0, 0),
+    new THREE.Vector3(0, bodyHeightM / 2 + 0.015, 0),
+    Math.max(robotLengthM, robotWidthM) * 0.7,
+    color
+  );
+  group.add(arrow);
+  group.visible = false;
+  return group;
+}
+
+/**
+ * Speaker / processor hub (hex funnel) — two independent instances for blue- and red-side field
+ * symmetry (PathPlanner rotational flip).
+ */
+function buildSpeakerHubAssembly(): THREE.Group {
+  const hubRoot = new THREE.Group();
+  const funnelH = 1.55;
+  const funnelRTop = 0.62;
+  const funnelRBot = 0.19;
+  const HEX = 6;
+
+  const funnelMat = new THREE.MeshStandardMaterial({
+    color: 0xb8c0cc,
+    metalness: 0.78,
+    roughness: 0.32,
+    side: THREE.DoubleSide,
+    emissive: 0xff6b2d,
+    emissiveIntensity: 0.06,
+  });
+  const funnelGeom = new THREE.CylinderGeometry(
+    funnelRTop,
+    funnelRBot,
+    funnelH,
+    HEX,
+    1,
+    true
+  );
+  const hubFunnel = new THREE.Mesh(funnelGeom, funnelMat);
+  hubFunnel.position.y = funnelH / 2 + 0.01;
+  hubFunnel.rotation.y = Math.PI / 6;
+  hubFunnel.castShadow = true;
+  hubFunnel.receiveShadow = true;
+  hubRoot.add(hubFunnel);
+
+  const innerMat = new THREE.MeshStandardMaterial({
+    color: 0x4a5568,
+    metalness: 0.55,
+    roughness: 0.52,
+    side: THREE.DoubleSide,
+  });
+  const innerGeom = new THREE.CylinderGeometry(
+    funnelRTop - 0.05,
+    funnelRBot - 0.035,
+    funnelH - 0.06,
+    HEX,
+    1,
+    true
+  );
+  const hubInner = new THREE.Mesh(innerGeom, innerMat);
+  hubInner.position.y = funnelH / 2 + 0.01;
+  hubInner.rotation.y = Math.PI / 6;
+  hubRoot.add(hubInner);
+
+  const rimMat = new THREE.MeshStandardMaterial({
+    color: 0xff9a4d,
+    metalness: 0.82,
+    roughness: 0.22,
+    emissive: 0xff6600,
+    emissiveIntensity: 0.12,
+  });
+  const rimGeom = new THREE.TorusGeometry(funnelRTop + 0.04, 0.04, 8, HEX);
+  const hubRim = new THREE.Mesh(rimGeom, rimMat);
+  hubRim.rotation.x = Math.PI / 2;
+  hubRim.rotation.z = Math.PI / 6;
+  hubRim.position.y = funnelH + 0.04;
+  hubRim.castShadow = true;
+  hubRoot.add(hubRim);
+
+  const capMat = new THREE.MeshStandardMaterial({
+    color: 0xa0a8b5,
+    metalness: 0.8,
+    roughness: 0.35,
+  });
+  const capThick = 0.055;
+  const apothemTop = funnelRTop * Math.cos(Math.PI / HEX);
+  const hexEdgeLen = 2 * funnelRTop * Math.sin(Math.PI / HEX);
+  for (let i = 0; i < HEX; i++) {
+    const ang = (i + 0.5) * ((2 * Math.PI) / HEX) + Math.PI / 6;
+    const capGeom = new THREE.BoxGeometry(capThick, 0.075, hexEdgeLen * 1.04);
+    const cap = new THREE.Mesh(capGeom, capMat);
+    const r = apothemTop + capThick / 2 + 0.02;
+    cap.position.set(Math.cos(ang) * r, funnelH + 0.038, Math.sin(ang) * r);
+    cap.rotation.y = -ang;
+    cap.castShadow = true;
+    hubRoot.add(cap);
+  }
+
+  const strutMat = new THREE.MeshStandardMaterial({
+    color: 0x8b95a5,
+    metalness: 0.75,
+    roughness: 0.38,
+  });
+  for (let i = 0; i < HEX; i++) {
+    const ang = (i * Math.PI) / 3 + Math.PI / 6;
+    const strutGeom = new THREE.BoxGeometry(0.065, funnelH * 0.94, 0.065);
+    const strut = new THREE.Mesh(strutGeom, strutMat);
+    const r = funnelRTop - 0.02;
+    strut.position.set(Math.cos(ang) * r, funnelH / 2 + 0.02, Math.sin(ang) * r);
+    strut.rotation.y = -ang;
+    strut.castShadow = true;
+    hubRoot.add(strut);
+  }
+
+  const throatCollarGeom = new THREE.CylinderGeometry(
+    funnelRBot + 0.045,
+    funnelRBot + 0.02,
+    0.11,
+    HEX,
+    1,
+    false
+  );
+  const throatCollarMat = new THREE.MeshStandardMaterial({
+    color: 0x9ca3af,
+    metalness: 0.7,
+    roughness: 0.4,
+  });
+  const throatCollar = new THREE.Mesh(throatCollarGeom, throatCollarMat);
+  throatCollar.position.y = 0.055;
+  throatCollar.rotation.y = Math.PI / 6;
+  throatCollar.castShadow = true;
+  hubRoot.add(throatCollar);
+
+  const mouthHintGeom = new THREE.RingGeometry(
+    funnelRTop * 0.74,
+    funnelRTop * 1.06,
+    HEX
+  );
+  const mouthHintMat = new THREE.MeshBasicMaterial({
+    color: 0xffb84d,
+    transparent: true,
+    opacity: 0.28,
+    side: THREE.DoubleSide,
+  });
+  const mouthHint = new THREE.Mesh(mouthHintGeom, mouthHintMat);
+  mouthHint.rotation.x = -Math.PI / 2;
+  mouthHint.rotation.z = Math.PI / 6;
+  mouthHint.position.y = funnelH + 0.045;
+  hubRoot.add(mouthHint);
+
+  const intakeRingGeom = new THREE.RingGeometry(funnelRBot * 0.42, funnelRBot * 1.38, HEX);
+  const intakeRingMat = new THREE.MeshBasicMaterial({
+    color: 0xffaa55,
+    transparent: true,
+    opacity: 0.38,
+    side: THREE.DoubleSide,
+  });
+  const intakeRing = new THREE.Mesh(intakeRingGeom, intakeRingMat);
+  intakeRing.rotation.x = -Math.PI / 2;
+  intakeRing.rotation.z = Math.PI / 6;
+  intakeRing.position.y = 0.012;
+  hubRoot.add(intakeRing);
+
+  const hubLight = new THREE.PointLight(0xffaa77, 2.4, 7, 2);
+  hubLight.position.set(0, funnelH * 0.55, 0);
+  hubRoot.add(hubLight);
+
+  hubRoot.userData.hubFunnel = hubFunnel;
+  hubRoot.userData.hubRim = hubRim;
+  hubRoot.userData.hubMouthHint = mouthHint;
+  hubRoot.userData.hubIntakeRing = intakeRing;
+
+  return hubRoot;
 }
 
 function duplicateOffsetsForShots(points: KnnPoint[]): { dx: number; dy: number; lift: number }[] {
@@ -125,14 +365,33 @@ export default function SimulationView({
   fieldWidthM,
   robotLengthM,
   robotWidthM,
+  viewAsRedAlliance,
+  driverStationStationNumber,
   poseX,
   poseY,
   headingDeg,
+  limelightPoseX,
+  limelightPoseY,
+  limelightHeadingDeg,
+  limelightPoseVisible = false,
+  limelightHasLock = false,
+  limelightFrontPoseX,
+  limelightFrontPoseY,
+  limelightFrontHeadingDeg,
+  limelightFrontPoseVisible = false,
+  limelightFrontHasLock = false,
+  idealShooterPoseX,
+  idealShooterPoseY,
+  idealShooterHeadingDeg,
+  idealShooterPoseVisible = false,
   turretAngleDeg,
   hoodPitchDeg,
   velocityMps,
   shotMapPoints,
+  isRedAlliance,
   knnSelectedIndex,
+  knnNearestIndexBlue,
+  knnNearestIndexRed,
   connected,
   swerveSpeedMps,
   shooterRpm,
@@ -155,6 +414,58 @@ export default function SimulationView({
   onApplyMockShotFromSim,
   onSaveKnnShootTarget,
 }: SimulationViewProps) {
+  /**
+   * Nearest map row index: when connected, {@code /KNN/selectedIndex} from the robot (same list order as
+   * {@code knn_map.json}); otherwise local {@link inferKnn} (Y-mirror on red matches {@code KnnInterpreter}).
+   */
+  const effectiveKnnSelectedIndex = useMemo(() => {
+    const inferred = inferKnn(
+      { x: poseX, y: poseY, headingDeg },
+      shotMapPoints,
+      { k: 1, fieldWidthM: fieldWidthM, isRedAlliance }
+    );
+    const localIdx = inferred?.inferredIndex ?? -1;
+    if (connected && knnSelectedIndex >= 0) {
+      return knnSelectedIndex;
+    }
+    return localIdx;
+  }, [
+    poseX,
+    poseY,
+    headingDeg,
+    shotMapPoints,
+    fieldWidthM,
+    isRedAlliance,
+    connected,
+    knnSelectedIndex,
+  ]);
+
+  /** Geometric nearest map index if the robot used raw WPIBlue pose for distance (dashboard + NT). */
+  const effectiveKnnNearestBlue = useMemo(() => {
+    if (connected && knnNearestIndexBlue >= 0) {
+      return knnNearestIndexBlue;
+    }
+    const inferred = inferKnn(
+      { x: poseX, y: poseY, headingDeg },
+      shotMapPoints,
+      { k: 1, fieldWidthM, isRedAlliance: false, mirrorRedAllianceLookup: true }
+    );
+    return inferred?.inferredIndex ?? -1;
+  }, [connected, knnNearestIndexBlue, poseX, poseY, headingDeg, shotMapPoints, fieldWidthM]);
+
+  /** Geometric nearest map index if the robot used Y-mirrored pose (red-side lookup frame). */
+  const effectiveKnnNearestRed = useMemo(() => {
+    if (connected && knnNearestIndexRed >= 0) {
+      return knnNearestIndexRed;
+    }
+    const inferred = inferKnn(
+      { x: poseX, y: poseY, headingDeg },
+      shotMapPoints,
+      { k: 1, fieldWidthM, isRedAlliance: true, mirrorRedAllianceLookup: true }
+    );
+    return inferred?.inferredIndex ?? -1;
+  }, [connected, knnNearestIndexRed, poseX, poseY, headingDeg, shotMapPoints, fieldWidthM]);
+
   type PlaceFieldMode = 'none' | 'drop' | 'origin';
   const [clickedShotIndex, setClickedShotIndex] = useState<number | null>(null);
   const [placeFieldMode, setPlaceFieldMode] = useState<PlaceFieldMode>('none');
@@ -186,6 +497,8 @@ export default function SimulationView({
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const robotRef = useRef<THREE.Group | null>(null);
+  const limelightGhostRef = useRef<THREE.Group | null>(null);
+  const limelightFrontGhostRef = useRef<THREE.Group | null>(null);
   const turretMeshRefsRef = useRef<TurretMeshRefs | null>(null);
   const turretRef = useRef<THREE.Group | null>(null);
   const hoodPivotRef = useRef<THREE.Group | null>(null);
@@ -199,7 +512,10 @@ export default function SimulationView({
   const dropMarkersGroupRef = useRef<THREE.Group | null>(null);
   const originMarkersGroupRef = useRef<THREE.Group | null>(null);
   const aimLineGroupRef = useRef<THREE.Group | null>(null);
-  const hubVfxRef = useRef<THREE.Group | null>(null);
+  const idealAimLineGroupRef = useRef<THREE.Group | null>(null);
+  const hubVfxRootsRef = useRef<THREE.Group[]>([]);
+  /** All field-space content (floor, hub, robot, markers); yaw for red vs blue driver perspective. */
+  const fieldRootRef = useRef<THREE.Group | null>(null);
   const animationRef = useRef<number | null>(null);
 
   /** Default orbit: look from blue alliance (field x≈0) toward +X / red; matches WPIBlue (0,0) corner. */
@@ -267,190 +583,83 @@ export default function SimulationView({
     const fieldMesh = new THREE.Mesh(fieldGeometry, fieldMaterial);
     fieldMesh.rotation.x = -Math.PI / 2;
     fieldMesh.receiveShadow = true;
-    scene.add(fieldMesh);
 
     const borderGeometry = new THREE.EdgesGeometry(fieldGeometry);
     const borderMaterial = new THREE.LineBasicMaterial({ color: 0x2f3a52 });
     const border = new THREE.LineSegments(borderGeometry, borderMaterial);
     border.rotation.x = -Math.PI / 2;
-    scene.add(border);
 
     const gridSize = Math.max(fieldLengthM, fieldWidthM);
     const grid = new THREE.GridHelper(gridSize, 24, 0x1e3a5f, 0x0f1e30);
     grid.position.y = 0.002;
-    scene.add(grid);
 
+    const halfLen = fieldLengthM / 2;
+    const zoneBlueGeom = new THREE.PlaneGeometry(halfLen, fieldWidthM);
+    const zoneBlueMat = new THREE.MeshBasicMaterial({
+      color: 0x2563eb,
+      transparent: true,
+      opacity: 0.16,
+      depthWrite: false,
+    });
+    const zoneBlue = new THREE.Mesh(zoneBlueGeom, zoneBlueMat);
+    zoneBlue.rotation.x = -Math.PI / 2;
+    zoneBlue.position.set(-halfLen / 2, 0.006, 0);
+
+    const zoneRedGeom = new THREE.PlaneGeometry(halfLen, fieldWidthM);
+    const zoneRedMat = new THREE.MeshBasicMaterial({
+      color: 0xdc2626,
+      transparent: true,
+      opacity: 0.16,
+      depthWrite: false,
+    });
+    const zoneRed = new THREE.Mesh(zoneRedGeom, zoneRedMat);
+    zoneRed.rotation.x = -Math.PI / 2;
+    zoneRed.position.set(halfLen / 2, 0.006, 0);
+
+    const fieldRoot = new THREE.Group();
+    fieldRootRef.current = fieldRoot;
+    fieldRoot.add(fieldMesh, border, grid, zoneBlue, zoneRed);
+    scene.add(fieldRoot);
+
+    const hubPrimary = buildSpeakerHubAssembly();
     const { wx: hubCx, wz: hubCz } = fieldPoseToWorldXZ(
       HUB_FIELD_X_M,
       HUB_FIELD_Y_M,
       fieldLengthM,
       fieldWidthM
     );
+    hubPrimary.position.set(hubCx, 0, hubCz);
+    fieldRoot.add(hubPrimary);
 
-    const hubRoot = new THREE.Group();
-    hubRoot.position.set(hubCx, 0, hubCz);
-    scene.add(hubRoot);
-    hubVfxRef.current = hubRoot;
-
-    /** Hexagonal open funnel: flat panels, wide hex mouth up, smaller hex throat down. */
-    const funnelH = 1.55;
-    const funnelRTop = 0.62;
-    const funnelRBot = 0.19;
-    const HEX = 6;
-
-    const funnelMat = new THREE.MeshStandardMaterial({
-      color: 0xb8c0cc,
-      metalness: 0.78,
-      roughness: 0.32,
-      side: THREE.DoubleSide,
-      emissive: 0xff6b2d,
-      emissiveIntensity: 0.06,
-    });
-    const funnelGeom = new THREE.CylinderGeometry(
-      funnelRTop,
-      funnelRBot,
-      funnelH,
-      HEX,
-      1,
-      true
+    const simFieldSize: FieldSize = { sizeXM: fieldLengthM, sizeYM: fieldWidthM };
+    const hubFlippedField = flipFieldPositionRotational(
+      HUB_FIELD_X_M,
+      HUB_FIELD_Y_M,
+      simFieldSize
     );
-    const hubFunnel = new THREE.Mesh(funnelGeom, funnelMat);
-    hubFunnel.position.y = funnelH / 2 + 0.01;
-    hubFunnel.rotation.y = Math.PI / 6;
-    hubFunnel.castShadow = true;
-    hubFunnel.receiveShadow = true;
-    hubRoot.add(hubFunnel);
-
-    const innerMat = new THREE.MeshStandardMaterial({
-      color: 0x4a5568,
-      metalness: 0.55,
-      roughness: 0.52,
-      side: THREE.DoubleSide,
-    });
-    const innerGeom = new THREE.CylinderGeometry(
-      funnelRTop - 0.05,
-      funnelRBot - 0.035,
-      funnelH - 0.06,
-      HEX,
-      1,
-      true
+    const hubSecondary = buildSpeakerHubAssembly();
+    const { wx: hfx, wz: hfz } = fieldPoseToWorldXZ(
+      hubFlippedField.x,
+      hubFlippedField.y,
+      fieldLengthM,
+      fieldWidthM
     );
-    const hubInner = new THREE.Mesh(innerGeom, innerMat);
-    hubInner.position.y = funnelH / 2 + 0.01;
-    hubInner.rotation.y = Math.PI / 6;
-    hubRoot.add(hubInner);
-
-    const rimMat = new THREE.MeshStandardMaterial({
-      color: 0xff9a4d,
-      metalness: 0.82,
-      roughness: 0.22,
-      emissive: 0xff6600,
-      emissiveIntensity: 0.12,
-    });
-    const rimGeom = new THREE.TorusGeometry(funnelRTop + 0.04, 0.04, 8, HEX);
-    const hubRim = new THREE.Mesh(rimGeom, rimMat);
-    hubRim.rotation.x = Math.PI / 2;
-    hubRim.rotation.z = Math.PI / 6;
-    hubRim.position.y = funnelH + 0.04;
-    hubRim.castShadow = true;
-    hubRoot.add(hubRim);
-
-    const capMat = new THREE.MeshStandardMaterial({
-      color: 0xa0a8b5,
-      metalness: 0.8,
-      roughness: 0.35,
-    });
-    const capThick = 0.055;
-    const apothemTop = funnelRTop * Math.cos(Math.PI / HEX);
-    const hexEdgeLen = 2 * funnelRTop * Math.sin(Math.PI / HEX);
-    for (let i = 0; i < HEX; i++) {
-      const ang = (i + 0.5) * ((2 * Math.PI) / HEX) + Math.PI / 6;
-      const capGeom = new THREE.BoxGeometry(capThick, 0.075, hexEdgeLen * 1.04);
-      const cap = new THREE.Mesh(capGeom, capMat);
-      const r = apothemTop + capThick / 2 + 0.02;
-      cap.position.set(Math.cos(ang) * r, funnelH + 0.038, Math.sin(ang) * r);
-      cap.rotation.y = -ang;
-      cap.castShadow = true;
-      hubRoot.add(cap);
-    }
-
-    const strutMat = new THREE.MeshStandardMaterial({
-      color: 0x8b95a5,
-      metalness: 0.75,
-      roughness: 0.38,
-    });
-    for (let i = 0; i < HEX; i++) {
-      const ang = (i * Math.PI) / 3 + Math.PI / 6;
-      const strutGeom = new THREE.BoxGeometry(0.065, funnelH * 0.94, 0.065);
-      const strut = new THREE.Mesh(strutGeom, strutMat);
-      const r = funnelRTop - 0.02;
-      strut.position.set(Math.cos(ang) * r, funnelH / 2 + 0.02, Math.sin(ang) * r);
-      strut.rotation.y = -ang;
-      strut.castShadow = true;
-      hubRoot.add(strut);
-    }
-
-    const throatCollarGeom = new THREE.CylinderGeometry(
-      funnelRBot + 0.045,
-      funnelRBot + 0.02,
-      0.11,
-      HEX,
-      1,
-      false
-    );
-    const throatCollarMat = new THREE.MeshStandardMaterial({
-      color: 0x9ca3af,
-      metalness: 0.7,
-      roughness: 0.4,
-    });
-    const throatCollar = new THREE.Mesh(throatCollarGeom, throatCollarMat);
-    throatCollar.position.y = 0.055;
-    throatCollar.rotation.y = Math.PI / 6;
-    throatCollar.castShadow = true;
-    hubRoot.add(throatCollar);
-
-    const mouthHintGeom = new THREE.RingGeometry(
-      funnelRTop * 0.74,
-      funnelRTop * 1.06,
-      HEX
-    );
-    const mouthHintMat = new THREE.MeshBasicMaterial({
-      color: 0xffb84d,
-      transparent: true,
-      opacity: 0.28,
-      side: THREE.DoubleSide,
-    });
-    const mouthHint = new THREE.Mesh(mouthHintGeom, mouthHintMat);
-    mouthHint.rotation.x = -Math.PI / 2;
-    mouthHint.rotation.z = Math.PI / 6;
-    mouthHint.position.y = funnelH + 0.045;
-    hubRoot.add(mouthHint);
-
-    const intakeRingGeom = new THREE.RingGeometry(funnelRBot * 0.42, funnelRBot * 1.38, HEX);
-    const intakeRingMat = new THREE.MeshBasicMaterial({
-      color: 0xffaa55,
-      transparent: true,
-      opacity: 0.38,
-      side: THREE.DoubleSide,
-    });
-    const intakeRing = new THREE.Mesh(intakeRingGeom, intakeRingMat);
-    intakeRing.rotation.x = -Math.PI / 2;
-    intakeRing.rotation.z = Math.PI / 6;
-    intakeRing.position.y = 0.012;
-    hubRoot.add(intakeRing);
-
-    const hubLight = new THREE.PointLight(0xffaa77, 2.4, 7, 2);
-    hubLight.position.set(0, funnelH * 0.55, 0);
-    hubRoot.add(hubLight);
-
-    hubRoot.userData.hubFunnel = hubFunnel;
-    hubRoot.userData.hubRim = hubRim;
-    hubRoot.userData.hubMouthHint = mouthHint;
-    hubRoot.userData.hubIntakeRing = intakeRing;
+    hubSecondary.position.set(hfx, 0, hfz);
+    hubSecondary.rotation.y = Math.PI;
+    fieldRoot.add(hubSecondary);
+    hubVfxRootsRef.current = [hubPrimary, hubSecondary];
 
     const robotGroup = new THREE.Group();
-    scene.add(robotGroup);
+    fieldRoot.add(robotGroup);
     robotRef.current = robotGroup;
+
+    const limelightGhost = createPhantomPoseGhost(robotLengthM, robotWidthM, 0xf97316, 0.34);
+    fieldRoot.add(limelightGhost);
+    limelightGhostRef.current = limelightGhost;
+
+    const limelightFrontGhost = createPhantomPoseGhost(robotLengthM, robotWidthM, 0xec4899, 0.34);
+    fieldRoot.add(limelightFrontGhost);
+    limelightFrontGhostRef.current = limelightFrontGhost;
 
     const robotGeometry = new THREE.BoxGeometry(
       robotLengthM,
@@ -483,7 +692,7 @@ export default function SimulationView({
     pinionMeshRef.current = refs.pinionMeshRef;
 
     const vectorArrowsGroup = new THREE.Group();
-    scene.add(vectorArrowsGroup);
+    fieldRoot.add(vectorArrowsGroup);
     vectorArrowsGroupRef.current = vectorArrowsGroup;
 
     const headingVectorArrow = new THREE.ArrowHelper(
@@ -514,15 +723,15 @@ export default function SimulationView({
     velocityVectorArrowRef.current = velocityVectorArrow;
 
     const shotMarkersGroup = new THREE.Group();
-    scene.add(shotMarkersGroup);
+    fieldRoot.add(shotMarkersGroup);
     shotMarkersGroupRef.current = shotMarkersGroup;
 
     const dropMarkersGroup = new THREE.Group();
-    scene.add(dropMarkersGroup);
+    fieldRoot.add(dropMarkersGroup);
     dropMarkersGroupRef.current = dropMarkersGroup;
 
     const originMarkersGroup = new THREE.Group();
-    scene.add(originMarkersGroup);
+    fieldRoot.add(originMarkersGroup);
     originMarkersGroupRef.current = originMarkersGroup;
 
     const updateCamera = () => {
@@ -580,6 +789,18 @@ export default function SimulationView({
             if (shotGroup && shotGroup.children.length > 0) {
               const hits = raycaster.intersectObjects(shotGroup.children, true);
               for (const hit of hits) {
+                let el: THREE.Object3D | null = hit.object;
+                let isGhost = false;
+                while (el) {
+                  if (el.userData.ghostDuplicate) {
+                    isGhost = true;
+                    break;
+                  }
+                  el = el.parent;
+                }
+                if (isGhost) {
+                  continue;
+                }
                 let o: THREE.Object3D | null = hit.object;
                 while (o) {
                   if (typeof o.userData.mapIndex === 'number') {
@@ -598,6 +819,13 @@ export default function SimulationView({
               if (dropGroup && dropGroup.children.length > 0) {
                 const dHits = raycaster.intersectObjects(dropGroup.children, true);
                 outer: for (const hit of dHits) {
+                  let el: THREE.Object3D | null = hit.object;
+                  while (el) {
+                    if (el.userData.ghostDuplicate) {
+                      continue outer;
+                    }
+                    el = el.parent;
+                  }
                   let o: THREE.Object3D | null = hit.object;
                   while (o) {
                     if (typeof o.userData.dropTargetId === 'string') {
@@ -710,9 +938,8 @@ export default function SimulationView({
         if (!refs.matWheelRef.emissive) refs.matWheelRef.emissive = new THREE.Color();
         refs.matWheelRef.emissive.setScalar(speedNorm * 0.4);
       }
-      const hubRoot = hubVfxRef.current;
-      if (hubRoot) {
-        const t = clockRef.current.elapsedTime;
+      const t = clockRef.current.elapsedTime;
+      for (const hubRoot of hubVfxRootsRef.current) {
         const funnel = hubRoot.userData.hubFunnel as THREE.Mesh | undefined;
         if (funnel?.material instanceof THREE.MeshStandardMaterial) {
           funnel.material.emissiveIntensity = 0.05 + 0.06 * Math.sin(t * 2.4);
@@ -748,20 +975,25 @@ export default function SimulationView({
       window.removeEventListener('keyup', onKeyUp);
       container.removeEventListener('mousedown', onMouseDown);
       container.removeEventListener('wheel', onWheel);
-      const hubRootCleanup = hubVfxRef.current;
-      if (hubRootCleanup) {
-        disposeObject3DSubtree(hubRootCleanup);
-        scene.remove(hubRootCleanup);
+      for (const hr of hubVfxRootsRef.current) {
+        disposeObject3DSubtree(hr);
       }
-      hubVfxRef.current = null;
+      hubVfxRootsRef.current = [];
+      fieldRootRef.current = null;
       renderer.dispose();
       fieldGeometry.dispose();
       fieldMaterial.dispose();
       borderGeometry.dispose();
       borderMaterial.dispose();
+      zoneBlueGeom.dispose();
+      zoneBlueMat.dispose();
+      zoneRedGeom.dispose();
+      zoneRedMat.dispose();
       robotGeometry.dispose();
       robotMaterial.dispose();
       scene.clear();
+      limelightGhostRef.current = null;
+      limelightFrontGhostRef.current = null;
       turretMeshRefsRef.current = null;
       turretRef.current = null;
       hoodPivotRef.current = null;
@@ -773,11 +1005,19 @@ export default function SimulationView({
       shotMarkersGroupRef.current = null;
       dropMarkersGroupRef.current = null;
       originMarkersGroupRef.current = null;
+      idealAimLineGroupRef.current = null;
       if (renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
       }
     };
   }, [fieldLengthM, fieldWidthM, robotLengthM, robotWidthM]);
+
+  useEffect(() => {
+    const fr = fieldRootRef.current;
+    if (fr) {
+      fr.rotation.y = viewAsRedAlliance ? Math.PI : 0;
+    }
+  }, [viewAsRedAlliance]);
 
   useEffect(() => {
     const robotGroup = robotRef.current;
@@ -805,8 +1045,143 @@ export default function SimulationView({
   }, [fieldLengthM, fieldWidthM, headingDeg, poseX, poseY]);
 
   useEffect(() => {
+    const ghost = limelightGhostRef.current;
+    if (!ghost) return;
+    ghost.visible = limelightPoseVisible;
+    if (!limelightPoseVisible) return;
+    const { wx, wz } = fieldPoseToWorldXZ(
+      limelightPoseX ?? 0,
+      limelightPoseY ?? 0,
+      fieldLengthM,
+      fieldWidthM
+    );
+    ghost.position.set(wx, 0, wz);
+    ghost.rotation.y = fieldHeadingDegToSceneYawRad(limelightHeadingDeg ?? 0);
+  }, [
+    fieldLengthM,
+    fieldWidthM,
+    limelightHeadingDeg,
+    limelightPoseVisible,
+    limelightPoseX,
+    limelightPoseY,
+  ]);
+
+  useEffect(() => {
+    const ghost = limelightFrontGhostRef.current;
+    if (!ghost) return;
+    ghost.visible = limelightFrontPoseVisible;
+    if (!limelightFrontPoseVisible) return;
+    const { wx, wz } = fieldPoseToWorldXZ(
+      limelightFrontPoseX ?? 0,
+      limelightFrontPoseY ?? 0,
+      fieldLengthM,
+      fieldWidthM
+    );
+    ghost.position.set(wx, 0, wz);
+    ghost.rotation.y = fieldHeadingDegToSceneYawRad(limelightFrontHeadingDeg ?? 0);
+  }, [
+    fieldLengthM,
+    fieldWidthM,
+    limelightFrontHeadingDeg,
+    limelightFrontPoseVisible,
+    limelightFrontPoseX,
+    limelightFrontPoseY,
+  ]);
+
+  useEffect(() => {
     velocityMpsRef.current = velocityMps;
   }, [velocityMps]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    const disposeIdealAimLine = () => {
+      const existing = idealAimLineGroupRef.current;
+      if (!existing) return;
+      const parent = existing.parent;
+      if (parent) parent.remove(existing);
+      existing.traverse((child) => {
+        if (child instanceof THREE.Line) {
+          child.geometry.dispose();
+          const mat = child.material;
+          if (!Array.isArray(mat)) mat.dispose();
+        }
+      });
+      idealAimLineGroupRef.current = null;
+    };
+
+    disposeIdealAimLine();
+
+    if (!idealShooterPoseVisible) return;
+
+    const startFieldX = THREE.MathUtils.clamp(idealShooterPoseX ?? poseX, 0, fieldLengthM);
+    const startFieldY = THREE.MathUtils.clamp(idealShooterPoseY ?? poseY, 0, fieldWidthM);
+    const headingRad = THREE.MathUtils.degToRad(idealShooterHeadingDeg ?? 0);
+    const dirX = Math.cos(headingRad);
+    const dirY = Math.sin(headingRad);
+    const tCandidates: number[] = [];
+    const EPS = 1e-6;
+
+    if (Math.abs(dirX) > EPS) {
+      tCandidates.push((0 - startFieldX) / dirX, (fieldLengthM - startFieldX) / dirX);
+    }
+    if (Math.abs(dirY) > EPS) {
+      tCandidates.push((0 - startFieldY) / dirY, (fieldWidthM - startFieldY) / dirY);
+    }
+
+    const t = tCandidates
+      .filter((candidate) => Number.isFinite(candidate) && candidate > 0)
+      .reduce((best, candidate) => Math.min(best, candidate), Number.POSITIVE_INFINITY);
+
+    const travelM = Number.isFinite(t) ? Math.max(0.6, t) : 3;
+    const endFieldX = THREE.MathUtils.clamp(startFieldX + dirX * travelM, 0, fieldLengthM);
+    const endFieldY = THREE.MathUtils.clamp(startFieldY + dirY * travelM, 0, fieldWidthM);
+    const { wx: sx, wz: sz } = fieldPoseToWorldXZ(
+      startFieldX,
+      startFieldY,
+      fieldLengthM,
+      fieldWidthM
+    );
+    const { wx: ex, wz: ez } = fieldPoseToWorldXZ(
+      endFieldX,
+      endFieldY,
+      fieldLengthM,
+      fieldWidthM
+    );
+
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(sx, ROBOT_HEIGHT_M + 0.06, sz),
+        new THREE.Vector3(ex, ROBOT_HEIGHT_M + 0.06, ez),
+      ]),
+      new THREE.LineDashedMaterial({
+        color: 0x14b8a6,
+        transparent: true,
+        opacity: 0.82,
+        dashSize: 0.25,
+        gapSize: 0.16,
+      })
+    );
+    line.computeLineDistances();
+
+    const grp = new THREE.Group();
+    grp.add(line);
+    const parent = fieldRootRef.current ?? scene;
+    parent.add(grp);
+    idealAimLineGroupRef.current = grp;
+
+    return disposeIdealAimLine;
+  }, [
+    fieldLengthM,
+    fieldWidthM,
+    idealShooterHeadingDeg,
+    idealShooterPoseVisible,
+    idealShooterPoseX,
+    idealShooterPoseY,
+    poseX,
+    poseY,
+  ]);
 
   useEffect(() => {
     const turret = turretRef.current;
@@ -885,22 +1260,38 @@ export default function SimulationView({
       roughness: 0.4,
     });
 
-    for (let index = 0; index < shotMapPoints.length; index++) {
-      const p = shotMapPoints[index];
-      if (isPlaceholderKnnPoint(p)) {
-        continue;
-      }
-      const { dx, dy, lift } = offsets[index] ?? { dx: 0, dy: 0, lift: 0 };
-      const px = THREE.MathUtils.clamp(p.x + dx, 0, fieldLengthM);
-      const py = THREE.MathUtils.clamp(p.y + dy, 0, fieldWidthM);
+    const fieldSize: FieldSize = { sizeXM: fieldLengthM, sizeYM: fieldWidthM };
+    const hubFieldFlipped = flipFieldPositionRotational(HUB_FIELD_X_M, HUB_FIELD_Y_M, fieldSize);
+
+    const addKnnMarkerAtField = (
+      fieldPx: number,
+      fieldPy: number,
+      lift: number,
+      headingDeg: number,
+      mapIndex: number | undefined,
+      mapFitHubX: number,
+      mapFitHubY: number
+    ) => {
+      const px = THREE.MathUtils.clamp(fieldPx, 0, fieldLengthM);
+      const py = THREE.MathUtils.clamp(fieldPy, 0, fieldWidthM);
       const { wx, wz } = fieldPoseToWorldXZ(px, py, fieldLengthM, fieldWidthM);
 
       const markerRoot = new THREE.Group();
-      markerRoot.userData.mapIndex = index;
       markerRoot.position.set(wx, 0, wz);
+      if (mapIndex !== undefined) {
+        markerRoot.userData.mapIndex = mapIndex;
+      } else {
+        markerRoot.userData.ghostDuplicate = true;
+      }
 
-      const isClick = clickedShotIndex === index;
-      const isNt = knnSelectedIndex >= 0 && knnSelectedIndex === index;
+      const isPrimary = mapIndex !== undefined;
+      const isClick = isPrimary && clickedShotIndex === mapIndex;
+      const isNt =
+        isPrimary && effectiveKnnSelectedIndex >= 0 && effectiveKnnSelectedIndex === mapIndex;
+      const isInfBlue =
+        isPrimary && effectiveKnnNearestBlue >= 0 && effectiveKnnNearestBlue === mapIndex;
+      const isInfRed =
+        isPrimary && effectiveKnnNearestRed >= 0 && effectiveKnnNearestRed === mapIndex;
       const sphereMat = isClick ? matInspect : isNt ? matSelected : matDefault;
       const arrowColor = isClick ? 0xfde68a : isNt ? 0xf9a8d4 : 0x6ee7b7;
 
@@ -909,7 +1300,38 @@ export default function SimulationView({
       sphere.castShadow = true;
       markerRoot.add(sphere);
 
-      const dir = fieldHeadingDegToSceneForwardXZ(p.headingDeg ?? 0);
+      if (isInfBlue) {
+        const ringB = new THREE.Mesh(
+          new THREE.RingGeometry(0.13, 0.2, 28),
+          new THREE.MeshBasicMaterial({
+            color: 0x22d3ee,
+            transparent: true,
+            opacity: 0.95,
+            side: THREE.DoubleSide,
+          })
+        );
+        ringB.rotation.x = -Math.PI / 2;
+        ringB.position.y = 0.025 + lift;
+        ringB.renderOrder = 1;
+        markerRoot.add(ringB);
+      }
+      if (isInfRed) {
+        const ringR = new THREE.Mesh(
+          new THREE.RingGeometry(0.21, 0.3, 28),
+          new THREE.MeshBasicMaterial({
+            color: 0xfb923c,
+            transparent: true,
+            opacity: 0.92,
+            side: THREE.DoubleSide,
+          })
+        );
+        ringR.rotation.x = -Math.PI / 2;
+        ringR.position.y = 0.028 + lift;
+        ringR.renderOrder = 1;
+        markerRoot.add(ringR);
+      }
+
+      const dir = fieldHeadingDegToSceneForwardXZ(headingDeg);
       const arrow = new THREE.ArrowHelper(
         dir,
         new THREE.Vector3(0, 0.11 + lift, 0),
@@ -921,9 +1343,8 @@ export default function SimulationView({
       markerRoot.add(arrow);
 
       if (showShotMapHubHeading) {
-        // DriveConstants.rotationToFaceHubFromShotMap: atan2(dy,dx) + hubShotMapHeadingOffsetRad(dx,dy)
-        const hdx = HUB_FIELD_X_M - px;
-        const hdy = HUB_FIELD_Y_M - py;
+        const hdx = mapFitHubX - px;
+        const hdy = mapFitHubY - py;
         const mapFitDeg =
           hdx * hdx + hdy * hdy < HUB_SHOT_MAP_MIN_DIST_SQ_M2
             ? 0
@@ -944,6 +1365,30 @@ export default function SimulationView({
       }
 
       group.add(markerRoot);
+    };
+
+    for (let index = 0; index < shotMapPoints.length; index++) {
+      const p = shotMapPoints[index];
+      if (isPlaceholderKnnPoint(p)) {
+        continue;
+      }
+      const { dx, dy, lift } = offsets[index] ?? { dx: 0, dy: 0, lift: 0 };
+      const px = THREE.MathUtils.clamp(p.x + dx, 0, fieldLengthM);
+      const py = THREE.MathUtils.clamp(p.y + dy, 0, fieldWidthM);
+      const pyField = knnMapPointFieldYForAlliance(py, isRedAlliance, fieldWidthM);
+
+      addKnnMarkerAtField(px, pyField, lift, p.headingDeg ?? 0, index, HUB_FIELD_X_M, HUB_FIELD_Y_M);
+
+      const flipped = flipFieldPositionRotational(px, py, fieldSize);
+      addKnnMarkerAtField(
+        flipped.x,
+        flipped.y,
+        lift,
+        flipFieldHeadingDegRotational(p.headingDeg ?? 0),
+        undefined,
+        hubFieldFlipped.x,
+        hubFieldFlipped.y
+      );
     }
 
     return () => {
@@ -960,9 +1405,12 @@ export default function SimulationView({
     clickedShotIndex,
     fieldLengthM,
     fieldWidthM,
-    knnSelectedIndex,
+    effectiveKnnSelectedIndex,
+    effectiveKnnNearestBlue,
+    effectiveKnnNearestRed,
     shotMapPoints,
     showShotMapHubHeading,
+    isRedAlliance,
   ]);
 
   useEffect(() => {
@@ -989,13 +1437,24 @@ export default function SimulationView({
       disposeSubtree(ch);
     }
 
-    for (const t of dropTargets) {
-      const { wx, wz } = fieldPoseToWorldXZ(t.x, t.y, fieldLengthM, fieldWidthM);
-      const markerRoot = new THREE.Group();
-      markerRoot.userData.dropTargetId = t.id;
-      markerRoot.position.set(wx, 0, wz);
+    const fieldSize: FieldSize = { sizeXM: fieldLengthM, sizeYM: fieldWidthM };
 
-      const isSel = selectedDropTargetId === t.id;
+    const addDropCone = (
+      fieldX: number,
+      fieldY: number,
+      id: string | undefined,
+      ghost: boolean
+    ) => {
+      const { wx, wz } = fieldPoseToWorldXZ(fieldX, fieldY, fieldLengthM, fieldWidthM);
+      const markerRoot = new THREE.Group();
+      markerRoot.position.set(wx, 0, wz);
+      if (ghost) {
+        markerRoot.userData.ghostDuplicate = true;
+      } else if (id) {
+        markerRoot.userData.dropTargetId = id;
+      }
+
+      const isSel = id != null && selectedDropTargetId === id;
       const coneMat = new THREE.MeshStandardMaterial({
         color: isSel ? 0xfbbf24 : 0x38bdf8,
         emissive: isSel ? 0xb45309 : 0x000000,
@@ -1011,7 +1470,7 @@ export default function SimulationView({
       const ringMat = new THREE.MeshBasicMaterial({
         color: isSel ? 0xfde68a : 0x7dd3fc,
         transparent: true,
-        opacity: 0.85,
+        opacity: ghost ? 0.5 : 0.85,
         side: THREE.DoubleSide,
       });
       const ring = new THREE.Mesh(new THREE.RingGeometry(0.08, 0.2, 24), ringMat);
@@ -1020,6 +1479,12 @@ export default function SimulationView({
       markerRoot.add(ring);
 
       group.add(markerRoot);
+    };
+
+    for (const t of dropTargets) {
+      addDropCone(t.x, t.y, t.id, false);
+      const f = flipFieldPositionRotational(t.x, t.y, fieldSize);
+      addDropCone(f.x, f.y, undefined, true);
     }
 
     return () => {
@@ -1055,18 +1520,31 @@ export default function SimulationView({
       disposeSubtree(ch);
     }
 
-    for (const o of namedOrigins) {
-      const { wx, wz } = fieldPoseToWorldXZ(o.x, o.y, fieldLengthM, fieldWidthM);
+    const fieldSize: FieldSize = { sizeXM: fieldLengthM, sizeYM: fieldWidthM };
+
+    const addOriginPillar = (
+      fieldX: number,
+      fieldY: number,
+      originId: string | undefined,
+      ghost: boolean
+    ) => {
+      const { wx, wz } = fieldPoseToWorldXZ(fieldX, fieldY, fieldLengthM, fieldWidthM);
       const markerRoot = new THREE.Group();
-      markerRoot.userData.namedOriginId = o.id;
       markerRoot.position.set(wx, 0, wz);
+      if (ghost) {
+        markerRoot.userData.ghostDuplicate = true;
+      } else if (originId) {
+        markerRoot.userData.namedOriginId = originId;
+      }
 
       const pillarMat = new THREE.MeshStandardMaterial({
         color: 0xc084fc,
         emissive: 0x6b21a8,
-        emissiveIntensity: 0.2,
+        emissiveIntensity: ghost ? 0.12 : 0.2,
         metalness: 0.25,
         roughness: 0.5,
+        transparent: ghost,
+        opacity: ghost ? 0.65 : 1,
       });
       const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.32, 10), pillarMat);
       pillar.position.y = 0.18;
@@ -1077,6 +1555,8 @@ export default function SimulationView({
         color: 0xe9d5ff,
         metalness: 0.35,
         roughness: 0.4,
+        transparent: ghost,
+        opacity: ghost ? 0.65 : 1,
       });
       const cap = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), capMat);
       cap.position.y = 0.38;
@@ -1084,6 +1564,12 @@ export default function SimulationView({
       markerRoot.add(cap);
 
       group.add(markerRoot);
+    };
+
+    for (const o of namedOrigins) {
+      addOriginPillar(o.x, o.y, o.id, false);
+      const f = flipFieldPositionRotational(o.x, o.y, fieldSize);
+      addOriginPillar(f.x, f.y, undefined, true);
     }
 
     return () => {
@@ -1193,7 +1679,8 @@ export default function SimulationView({
     const line = new THREE.Line(lineGeom, lineMat);
     const grp = new THREE.Group();
     grp.add(line);
-    scene.add(grp);
+    const parent = fieldRootRef.current ?? scene;
+    parent.add(grp);
     aimLineGroupRef.current = grp;
 
     return () => {
@@ -1251,6 +1738,14 @@ export default function SimulationView({
   ]);
 
   const shotPlacesCount = shotMapPoints.filter((p) => !isPlaceholderKnnPoint(p)).length;
+
+  const driverStationSummary = useMemo(() => {
+    const side = viewAsRedAlliance ? 'Red' : 'Blue';
+    const pos =
+      driverStationStationNumber != null ? ` · station ${driverStationStationNumber}` : '';
+    const mirror = viewAsRedAlliance ? ' · mirrored view' : '';
+    return `Field ${side}${pos}${mirror}`;
+  }, [viewAsRedAlliance, driverStationStationNumber]);
 
   const inspected =
     clickedShotIndex !== null ? shotMapPoints[clickedShotIndex] ?? null : null;
@@ -1348,9 +1843,11 @@ export default function SimulationView({
     <section className="simulation-view" ref={simulationSectionRef}>
       <div className="simulation-canvas" ref={containerRef} />
       <p className="simulation-nav-hint" aria-hidden="true">
-        WASD — pan · Q/E — up/down · Mouse — orbit · Wheel — zoom · Hex funnel — hub ·         Click KNN shot —
-        aim line · Violet pillar — named alignment origins · Cyan — aim points (drops) · Teal — map · Gold —
-        selected shot · Pink — NT nearest · Optional lavender arrow — map-fit hub heading (checkbox)
+        WASD — pan · Q/E — up/down · Mouse — orbit · Wheel — zoom · Hex funnel — hubs (both alliances) ·
+        Blue/red floor tint · low field X = blue · high X = red · Symmetric KNN/drop/origin ghosts (decorative
+        only) · Teal dashed line — ideal shooting angle · Click KNN shot — aim line · Violet pillar — origins
+        · Cyan — drops · Teal — map · Gold — selected shot · Pink — NT nearest · Optional lavender — map-fit
+        hub heading (checkbox)
       </p>
       <div
         className="simulation-vectors-panel"
@@ -1390,6 +1887,41 @@ export default function SimulationView({
             ({poseX.toFixed(2)}, {poseY.toFixed(2)})
           </span>
         </div>
+        <div className="simulation-vector-row simulation-vector-pose">
+          <span className="simulation-vector-label">DS / FMS</span>
+          <span className="simulation-vector-value" title="FMSInfo when connected; mock defaults to blue">
+            {driverStationSummary}
+          </span>
+        </div>
+        <div className="simulation-vector-row">
+          <span className="simulation-vector-swatch" style={{ background: '#14b8a6' }} />
+          <span className="simulation-vector-label">Ideal aim</span>
+          <span className="simulation-vector-value">
+            {idealShooterPoseVisible ? `${(idealShooterHeadingDeg ?? 0).toFixed(1)}°` : '—'}
+          </span>
+        </div>
+        <div className="simulation-vector-row">
+          <span className="simulation-vector-swatch" style={{ background: '#f97316' }} />
+          <span className="simulation-vector-label">LL pose</span>
+          <span className="simulation-vector-value">
+            {limelightPoseVisible
+              ? `${(limelightPoseX ?? 0).toFixed(2)}, ${(limelightPoseY ?? 0).toFixed(2)}`
+              : limelightHasLock
+                ? 'Lock only'
+                : '—'}
+          </span>
+        </div>
+        <div className="simulation-vector-row">
+          <span className="simulation-vector-swatch" style={{ background: '#ec4899' }} />
+          <span className="simulation-vector-label">LL front</span>
+          <span className="simulation-vector-value">
+            {limelightFrontPoseVisible
+              ? `${(limelightFrontPoseX ?? 0).toFixed(2)}, ${(limelightFrontPoseY ?? 0).toFixed(2)}`
+              : limelightFrontHasLock
+                ? 'Lock only'
+                : '—'}
+          </span>
+        </div>
         <div className="simulation-vector-row">
           <span className="simulation-vector-swatch" style={{ background: '#94a3b8' }} />
           <span className="simulation-vector-label">NT</span>
@@ -1421,7 +1953,26 @@ export default function SimulationView({
           <span className="simulation-vector-label">KNN map</span>
           <span className="simulation-vector-value">
             {shotPlacesCount} shots
-            {knnSelectedIndex >= 0 ? ` · #${knnSelectedIndex}` : ''}
+            {effectiveKnnSelectedIndex >= 0 ? ` · sel #${effectiveKnnSelectedIndex}` : ''}
+            {effectiveKnnNearestBlue >= 0 ? (
+              <span title="Nearest row, raw WPIBlue pose">
+                {' '}
+                · <span style={{ color: '#22d3ee' }}>B{effectiveKnnNearestBlue}</span>
+              </span>
+            ) : null}
+            {effectiveKnnNearestRed >= 0 ? (
+              <span title="Nearest row, Y-mirrored pose (y′ = W−y)">
+                {' '}
+                · <span style={{ color: '#fb923c' }}>R{effectiveKnnNearestRed}</span>
+              </span>
+            ) : null}
+          </span>
+        </div>
+        <div className="simulation-vector-row">
+          <span className="simulation-vector-swatch" style={{ background: '#86efac' }} />
+          <span className="simulation-vector-label">KNN hood / RPM SP</span>
+          <span className="simulation-vector-value" title="Smoothed IDW targets while driving (robot)">
+            {hoodSetpointDeg.toFixed(1)}° · {Math.round(shooterRpmSetpoint)} rpm
           </span>
         </div>
         <label className="simulation-vector-row simulation-vector-checkbox-row">
@@ -1441,10 +1992,13 @@ export default function SimulationView({
       <div className="simulation-overlay" aria-hidden="true">
         <span className="simulation-badge">Simulation</span>
         <span className="simulation-stats">
-          Pose ({poseX.toFixed(1)}, {poseY.toFixed(1)}) · Heading {headingDeg.toFixed(0)}° · Turret{' '}
-          {turretAngleDeg.toFixed(0)}° · Hood {hoodPitchDeg.toFixed(0)}° · Flywheel {velocityMps.toFixed(1)}{' '}
-          m/s · Shooter {Math.round(shooterRpm)}/{Math.round(shooterRpmSetpoint)} rpm · KNN{' '}
-          {knnSelectedIndex >= 0 ? `#${knnSelectedIndex}` : '—'} · {shotPlacesCount} map shots
+          {driverStationSummary} · Pose ({poseX.toFixed(1)}, {poseY.toFixed(1)}) · Heading{' '}
+          {headingDeg.toFixed(0)}° · Turret {turretAngleDeg.toFixed(0)}° · Hood {hoodPitchDeg.toFixed(0)}° ·
+          Flywheel {velocityMps.toFixed(1)} m/s · Shooter {Math.round(shooterRpm)}/
+          {Math.round(shooterRpmSetpoint)} rpm · KNN sel{' '}
+          {effectiveKnnSelectedIndex >= 0 ? `#${effectiveKnnSelectedIndex}` : '—'} · B
+          {effectiveKnnNearestBlue >= 0 ? effectiveKnnNearestBlue : '—'} · R
+          {effectiveKnnNearestRed >= 0 ? effectiveKnnNearestRed : '—'} · {shotPlacesCount} map shots
         </span>
       </div>
 

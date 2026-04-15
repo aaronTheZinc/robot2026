@@ -10,19 +10,14 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj2.command.Command;
 
 import frc.robot.DriveConstants;
-import frc.robot.HubAlignCalibration;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 
-/**
- * In-place rotation toward the hub using the same heading law as driver right bumper (shot-map hub heading
- * plus {@link HubAlignCalibration} distance scaling).
- */
+/** In-place rotation toward the true hub center using the same heading law as driver right bumper. */
 public final class HubAlignCommands {
     private static final double kAlignTimeoutSeconds = 4.0;
 
     private final CommandSwerveDrivetrain drivetrain;
-    private final HubAlignCalibration hubAlignCalibration;
 
     private final SwerveRequest.FieldCentric hubAlignRequest =
             new SwerveRequest.FieldCentric()
@@ -30,9 +25,8 @@ public final class HubAlignCommands {
                     .withRotationalDeadband(0)
                     .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
-    public HubAlignCommands(CommandSwerveDrivetrain drivetrain, HubAlignCalibration hubAlignCalibration) {
+    public HubAlignCommands(CommandSwerveDrivetrain drivetrain) {
         this.drivetrain = drivetrain;
-        this.hubAlignCalibration = hubAlignCalibration;
     }
 
     /** Zero translation; rotate until within hub-align tolerance or timeout. */
@@ -49,14 +43,12 @@ public final class HubAlignCommands {
                 .applyRequest(
                         () -> {
                             var pose = drivetrain.getState().Pose;
-                            double offsetDeg =
-                                    hubAlignCalibration.getScaledOffsetDeg(pose)
-                                            + extraFieldHeadingOffsetDeg;
                             return hubAlignRequest
                                     .withVelocityX(0)
                                     .withVelocityY(0)
                                     .withRotationalRate(
-                                            DriveConstants.teleopOmegaTowardHub(pose, offsetDeg));
+                                            DriveConstants.teleopOmegaTowardHub(
+                                                    pose, extraFieldHeadingOffsetDeg));
                         })
                 .until(() -> isAlignedToHub(extraFieldHeadingOffsetDeg))
                 .withTimeout(kAlignTimeoutSeconds)
@@ -65,12 +57,7 @@ public final class HubAlignCommands {
 
     private boolean isAlignedToHub(double extraFieldHeadingOffsetDeg) {
         var pose = drivetrain.getState().Pose;
-        Rotation2d target =
-                DriveConstants.rotationToFaceHubFromShotMap(pose)
-                        .plus(
-                                Rotation2d.fromDegrees(
-                                        hubAlignCalibration.getScaledOffsetDeg(pose)
-                                                + extraFieldHeadingOffsetDeg));
+        Rotation2d target = DriveConstants.rotationToFaceHubForShooting(pose, extraFieldHeadingOffsetDeg);
         double errRad =
                 MathUtil.angleModulus(
                         target.getRadians() - pose.getRotation().getRadians());

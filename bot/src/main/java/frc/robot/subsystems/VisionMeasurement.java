@@ -20,6 +20,8 @@ import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.Optional;
 
 import frc.robot.DriveConstants;
@@ -34,12 +36,15 @@ import frc.robot.VisionConstants;
  * Fused {@link Pose2d} struct on NetworkTables: {@code /SmartDashboard/Odometry/FusedPose}.
  * <p>
  * Debug: {@code Pose/idealShooterPose} — {@code [x, y]} copied from fused odometry; {@code headingDeg} is
- * freshly computed so the robot would face the hub from that position ({@link DriveConstants#rotationToFaceHubFromShotMap(Pose2d)} — KNN map offsets).
+ * the geometric heading from the current pose to the true hub center.
  */
 public class VisionMeasurement extends SubsystemBase {
+    private static final String[] kCommonSecondaryLimelightAliases = {"limelight2", "limelight-front"};
+
     private final CommandSwerveDrivetrain m_drivetrain;
     private final String m_primaryLimelightName;
     private final String m_secondaryLimelightName;
+    private final String[] m_secondaryLimelightCandidates;
     private final boolean m_useMegaTag2;
 
     private final DoubleArrayPublisher m_dashboardPosePublisher = NetworkTableInstance.getDefault()
@@ -64,6 +69,10 @@ public class VisionMeasurement extends SubsystemBase {
             .getTable("Pose")
             .getBooleanTopic("limelightEstimatedPoseValid")
             .publish();
+    private final BooleanPublisher m_limelightHasLockPublisher = NetworkTableInstance.getDefault()
+            .getTable("Pose")
+            .getBooleanTopic("limelightHasLock")
+            .publish();
 
     private final DoubleArrayPublisher m_limelight2EstimatedPosePublisher = NetworkTableInstance.getDefault()
             .getTable("Pose")
@@ -72,6 +81,18 @@ public class VisionMeasurement extends SubsystemBase {
     private final BooleanPublisher m_limelight2EstimatedPoseValidPublisher = NetworkTableInstance.getDefault()
             .getTable("Pose")
             .getBooleanTopic("limelight2EstimatedPoseValid")
+            .publish();
+    private final DoubleArrayPublisher m_limelightFrontEstimatedPosePublisher = NetworkTableInstance.getDefault()
+            .getTable("Pose")
+            .getDoubleArrayTopic("limelightFrontEstimatedPose")
+            .publish();
+    private final BooleanPublisher m_limelightFrontEstimatedPoseValidPublisher = NetworkTableInstance.getDefault()
+            .getTable("Pose")
+            .getBooleanTopic("limelightFrontEstimatedPoseValid")
+            .publish();
+    private final BooleanPublisher m_limelightFrontHasLockPublisher = NetworkTableInstance.getDefault()
+            .getTable("Pose")
+            .getBooleanTopic("limelightFrontHasLock")
             .publish();
 
     private final double[] m_dashboardPose = new double[3];
@@ -82,6 +103,7 @@ public class VisionMeasurement extends SubsystemBase {
     /** Cached each {@link #periodic()} for lightweight readers (e.g. CSV session log). */
     private boolean m_primaryTvLock;
     private boolean m_secondaryTvLock;
+    private String m_resolvedSecondaryLimelightName;
     private double m_primaryTxDeg;
     private double m_primaryTyDeg;
     private double m_secondaryTxDeg;
@@ -123,6 +145,8 @@ public class VisionMeasurement extends SubsystemBase {
         m_primaryLimelightName =
                 primaryName != null && !primaryName.isBlank() ? primaryName : VisionConstants.kPrimaryLimelightName;
         m_secondaryLimelightName = secondaryName != null && !secondaryName.isBlank() ? secondaryName : null;
+        m_secondaryLimelightCandidates =
+                buildSecondaryLimelightCandidates(m_primaryLimelightName, m_secondaryLimelightName);
         m_useMegaTag2 = useMegaTag2;
     }
 
@@ -204,10 +228,11 @@ public class VisionMeasurement extends SubsystemBase {
     public void periodic() {
         var driveState = m_drivetrain.getState();
         double headingDeg = driveState.Pose.getRotation().getDegrees();
+        m_resolvedSecondaryLimelightName = resolveSecondaryLimelightName();
 
         LimelightHelpers.SetRobotOrientation(m_primaryLimelightName, headingDeg, 0, 0, 0, 0, 0);
-        if (m_secondaryLimelightName != null) {
-            LimelightHelpers.SetRobotOrientation(m_secondaryLimelightName, headingDeg, 0, 0, 0, 0, 0);
+        for (String candidate : m_secondaryLimelightCandidates) {
+            LimelightHelpers.SetRobotOrientation(candidate, headingDeg, 0, 0, 0, 0, 0);
         }
 
         Optional<BotPoseNetworkTableSample> ntPosePrimary =
@@ -217,6 +242,7 @@ public class VisionMeasurement extends SubsystemBase {
 
         double tvPrimary = LimelightHelpers.getLimelightNTDouble(m_primaryLimelightName, "tv");
         m_primaryTvLock = tvPrimary >= 1.0;
+        m_limelightHasLockPublisher.set(m_primaryTvLock);
         m_primaryTxDeg = LimelightHelpers.getLimelightNTDouble(m_primaryLimelightName, "tx");
         m_primaryTyDeg = LimelightHelpers.getLimelightNTDouble(m_primaryLimelightName, "ty");
         boolean validPrimary = tvPrimary >= 1.0 && ntPosePrimary.isPresent();
@@ -242,16 +268,37 @@ public class VisionMeasurement extends SubsystemBase {
             m_limelightEstimatedPoseValidPublisher.set(false);
         }
 
-        if (m_secondaryLimelightName != null) {
-            Optional<BotPoseNetworkTableSample> ntPoseSecondary =
-                    LimelightHelpers.getBotPoseNetworkTableSample(m_secondaryLimelightName, botPoseNtEntryName());
-            publishLimelightToSmartDashboard(
-                    "Limelight2/", m_secondaryLimelightName, ntPoseSecondary, m_periodsWithoutDataSecondary);
+        SmartDashboard.putString(
+                "Limelight2/configured_name", m_secondaryLimelightName != null ? m_secondaryLimelightName : "");
+        SmartDashboard.putString(
+                "Limelight2/resolved_name",
+                m_resolvedSecondaryLimelightName != null ? m_resolvedSecondaryLimelightName : "");
 
-            double tvSecondary = LimelightHelpers.getLimelightNTDouble(m_secondaryLimelightName, "tv");
-            m_secondaryTvLock = tvSecondary >= 1.0;
-            m_secondaryTxDeg = LimelightHelpers.getLimelightNTDouble(m_secondaryLimelightName, "tx");
-            m_secondaryTyDeg = LimelightHelpers.getLimelightNTDouble(m_secondaryLimelightName, "ty");
+        if (m_secondaryLimelightName != null) {
+            String secondaryReadName = getSecondaryReadTableName();
+            String secondaryName = secondaryReadName != null ? secondaryReadName : m_secondaryLimelightName;
+            Optional<BotPoseNetworkTableSample> ntPoseSecondary =
+                    secondaryReadName != null
+                            ? LimelightHelpers.getBotPoseNetworkTableSample(
+                                    secondaryReadName, botPoseNtEntryName())
+                            : Optional.empty();
+            publishLimelightToSmartDashboard(
+                    "Limelight2/", secondaryName, ntPoseSecondary, m_periodsWithoutDataSecondary);
+
+            m_secondaryTvLock = anySecondaryCandidateHasTagLock();
+            m_limelightFrontHasLockPublisher.set(m_secondaryTvLock);
+            double tvSecondary =
+                    secondaryReadName != null
+                            ? LimelightHelpers.getLimelightNTDouble(secondaryReadName, "tv")
+                            : 0.0;
+            m_secondaryTxDeg =
+                    secondaryReadName != null
+                            ? LimelightHelpers.getLimelightNTDouble(secondaryReadName, "tx")
+                            : 0.0;
+            m_secondaryTyDeg =
+                    secondaryReadName != null
+                            ? LimelightHelpers.getLimelightNTDouble(secondaryReadName, "ty")
+                            : 0.0;
             boolean validSecondary = tvSecondary >= 1.0 && ntPoseSecondary.isPresent();
             if (validSecondary) {
                 var reported2 = ntPoseSecondary.get().pose;
@@ -264,6 +311,11 @@ public class VisionMeasurement extends SubsystemBase {
                         m_limelight2EstimatedPosePublisher,
                         m_limelight2EstimatedPoseValidPublisher,
                         reported2);
+                publishLimelightEstimatedPose(
+                        m_limelight2EstimatedPose,
+                        m_limelightFrontEstimatedPosePublisher,
+                        m_limelightFrontEstimatedPoseValidPublisher,
+                        reported2);
                 if (DriverStation.isEnabled()) {
                     fuseBotPoseFromNetworkTables(ntPoseSecondary.get());
                 }
@@ -273,15 +325,19 @@ public class VisionMeasurement extends SubsystemBase {
                 m_secondaryReportedPoseYMeters = 0.0;
                 m_secondaryReportedPoseDeg = 0.0;
                 m_limelight2EstimatedPoseValidPublisher.set(false);
+                m_limelightFrontEstimatedPoseValidPublisher.set(false);
             }
         } else {
             m_secondaryTvLock = false;
+            m_limelightFrontHasLockPublisher.set(false);
             m_secondaryTxDeg = 0.0;
             m_secondaryTyDeg = 0.0;
             m_secondaryReportedPoseValid = false;
             m_secondaryReportedPoseXMeters = 0.0;
             m_secondaryReportedPoseYMeters = 0.0;
             m_secondaryReportedPoseDeg = 0.0;
+            m_limelight2EstimatedPoseValidPublisher.set(false);
+            m_limelightFrontEstimatedPoseValidPublisher.set(false);
         }
 
         publishFusedRobotPoseToDashboard(m_drivetrain.getState().Pose);
@@ -309,6 +365,65 @@ public class VisionMeasurement extends SubsystemBase {
     }
 
     private static final int kLogThrottlePeriods = 100;
+
+    private static String[] buildSecondaryLimelightCandidates(String primaryName, String secondaryName) {
+        if (secondaryName == null || secondaryName.isBlank()) {
+            return new String[0];
+        }
+
+        LinkedHashSet<String> names = new LinkedHashSet<>();
+        names.add(secondaryName);
+        for (String alias : kCommonSecondaryLimelightAliases) {
+            if (alias != null && !alias.isBlank()) {
+                names.add(alias);
+            }
+        }
+        names.remove(primaryName);
+        return new ArrayList<>(names).toArray(String[]::new);
+    }
+
+    /**
+     * Picks which NT table to use for secondary botpose / dashboard when multiple aliases are possible.
+     * Uses the first candidate that looks connected (pipeline type string, or live latency / target data).
+     */
+    private String resolveSecondaryLimelightName() {
+        for (String candidate : m_secondaryLimelightCandidates) {
+            String pipelineType = LimelightHelpers.getLimelightNTString(candidate, "getpipetype");
+            if (pipelineType != null && !pipelineType.isEmpty()) {
+                return candidate;
+            }
+            double tl = LimelightHelpers.getLimelightNTDouble(candidate, "tl");
+            double tv = LimelightHelpers.getLimelightNTDouble(candidate, "tv");
+            if (tl > 0.0 || tv >= 1.0) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * NT table name for reading secondary pose / tv when a secondary camera is configured. Prefer resolved alias;
+     * otherwise use the configured name so we still read {@code tv} if {@link #resolveSecondaryLimelightName} missed
+     * (e.g. empty {@code getpipetype} on some firmware).
+     */
+    private String getSecondaryReadTableName() {
+        if (m_secondaryLimelightName == null) {
+            return null;
+        }
+        return m_resolvedSecondaryLimelightName != null
+                ? m_resolvedSecondaryLimelightName
+                : m_secondaryLimelightName;
+    }
+
+    /** True if any secondary alias reports a valid target ({@code tv} ≥ 1). */
+    private boolean anySecondaryCandidateHasTagLock() {
+        for (String candidate : m_secondaryLimelightCandidates) {
+            if (LimelightHelpers.getLimelightNTDouble(candidate, "tv") >= 1.0) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /** Forwards Limelight NetworkTables values to SmartDashboard under the given prefix. */
     private void publishLimelightToSmartDashboard(
@@ -385,7 +500,7 @@ public class VisionMeasurement extends SubsystemBase {
 
         double odometryX = pose.getX();
         double odometryY = pose.getY();
-        var hubFacingRotation = DriveConstants.rotationToFaceHubFromShotMap(pose);
+        var hubFacingRotation = DriveConstants.rotationToFaceHub(pose);
         m_idealShooterPose[0] = odometryX;
         m_idealShooterPose[1] = odometryY;
         m_idealShooterPose[2] = hubFacingRotation.getDegrees();

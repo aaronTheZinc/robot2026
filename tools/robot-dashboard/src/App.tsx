@@ -52,6 +52,7 @@ import {
   type SimNamedOrigin,
 } from './lib/simFieldOrigins';
 import deployKnnMapJson from '../../../bot/src/main/deploy/knn_map.json';
+import { FIELD_LENGTH_M, FIELD_WIDTH_M } from './lib/fieldDimensions';
 
 const STORAGE_KEY_URI = 'robot-dashboard-uri';
 const STORAGE_KEY_PORT = 'robot-dashboard-port';
@@ -113,8 +114,6 @@ const DEBUG_TABS: ViewTab[] = [
   'knngrid',
 ];
 const COMPETITION_TABS: ViewTab[] = ['dashboard', 'turret', 'simulation', 'motortest'];
-const FIELD_LENGTH_M = 16.46;
-const FIELD_WIDTH_M = 8.23;
 const CURRENT_HISTORY_LIMIT = 90;
 
 type CurrentHistory = {
@@ -631,7 +630,16 @@ function App() {
   useEffect(() => {
     setState((prev) => applyRobotStateUpdate(prev, { mode }, Date.now()));
     if (mode === 'mock') {
-      setState((prev) => applyRobotStateUpdate(prev, { connected: false }, Date.now()));
+      setState((prev) =>
+        applyRobotStateUpdate(
+          prev,
+          {
+            connected: false,
+            driverStation: { isRedAlliance: false, stationNumber: null },
+          },
+          Date.now()
+        )
+      );
       setNt4Enabled(false);
     }
   }, [mode]);
@@ -652,7 +660,18 @@ function App() {
     }
     const subscription = connectRobotStateSubscription(uri, port, {
       onConnection: (connected) => {
-        setState((prev) => applyRobotStateUpdate(prev, { connected }, Date.now()));
+        setState((prev) =>
+          applyRobotStateUpdate(
+            prev,
+            connected
+              ? { connected }
+              : {
+                  connected,
+                  driverStation: { isRedAlliance: false, stationNumber: null },
+                },
+            Date.now()
+          )
+        );
       },
       onState: (update, timestampMs) => {
         setState((prev) => applyRobotStateUpdate(prev, update, timestampMs));
@@ -1048,11 +1067,15 @@ function App() {
             poseX={state.swerve.x}
             poseY={state.swerve.y}
             headingDeg={state.swerve.headingDeg}
+            isRedAlliance={state.driverStation.isRedAlliance}
             onPointChange={updateKnnPoint}
             onPointRemove={removeKnnPoint}
             robotSelectedIndex={
               state.knnSelectedIndex >= 0 ? state.knnSelectedIndex : null
             }
+            knnNearestIndexBlue={state.knnNearestIndexBlue}
+            knnNearestIndexRed={state.knnNearestIndexRed}
+            connected={state.connected}
           />
         </>
       )}
@@ -1089,14 +1112,35 @@ function App() {
           fieldWidthM={FIELD_WIDTH_M}
           robotLengthM={robotDims.lengthM}
           robotWidthM={robotDims.widthM}
+          viewAsRedAlliance={
+            mode === 'nt4' && nt4Enabled && state.connected && state.driverStation.isRedAlliance
+          }
+          driverStationStationNumber={state.driverStation.stationNumber}
           poseX={state.swerve.x}
           poseY={state.swerve.y}
           headingDeg={state.swerve.headingDeg}
+          limelightPoseX={state.limelightPose.x}
+          limelightPoseY={state.limelightPose.y}
+          limelightHeadingDeg={state.limelightPose.headingDeg}
+          limelightPoseVisible={state.limelightPose.valid}
+          limelightHasLock={state.limelightPose.hasLock}
+          limelightFrontPoseX={state.limelightFrontPose.x}
+          limelightFrontPoseY={state.limelightFrontPose.y}
+          limelightFrontHeadingDeg={state.limelightFrontPose.headingDeg}
+          limelightFrontPoseVisible={state.limelightFrontPose.valid}
+          limelightFrontHasLock={state.limelightFrontPose.hasLock}
           turretAngleDeg={state.turret.angleDeg}
           hoodPitchDeg={state.shooter.hoodPitchDeg}
           velocityMps={state.shooter.velocityMps}
+          idealShooterPoseX={state.idealShooterPose.x}
+          idealShooterPoseY={state.idealShooterPose.y}
+          idealShooterHeadingDeg={state.idealShooterPose.headingDeg}
+          idealShooterPoseVisible={state.connected}
           shotMapPoints={loggedPoints}
+          isRedAlliance={state.driverStation.isRedAlliance}
           knnSelectedIndex={state.knnSelectedIndex}
+          knnNearestIndexBlue={state.knnNearestIndexBlue}
+          knnNearestIndexRed={state.knnNearestIndexRed}
           connected={state.connected}
           swerveSpeedMps={state.swerve.speedMps}
           shooterRpm={state.shooter.rpm}
@@ -1253,6 +1297,24 @@ function App() {
                 {state.visionPose.valid
                   ? `${formatNumber(state.visionPose.headingDeg, 1)}°`
                   : '--'}
+              </div>
+            </div>
+            <div>
+              <div className="metric-label">LL Lock</div>
+              <div className="metric-value">{state.limelightPose.hasLock ? 'Yes' : 'No'}</div>
+            </div>
+            <div>
+              <div className="metric-label">LL Front Lock</div>
+              <div className="metric-value">
+                {state.limelightFrontPose.hasLock ? 'Yes' : 'No'}
+              </div>
+            </div>
+            <div>
+              <div className="metric-label">LL Front Pose</div>
+              <div className="metric-value">
+                {state.limelightFrontPose.valid
+                  ? `${formatNumber(state.limelightFrontPose.x, 2)}, ${formatNumber(state.limelightFrontPose.y, 2)}`
+                  : 'No target'}
               </div>
             </div>
           </div>

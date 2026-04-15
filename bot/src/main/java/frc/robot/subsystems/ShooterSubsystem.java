@@ -57,17 +57,17 @@ public class ShooterSubsystem extends SubsystemBase {
     private double hoodDashboardSetpointFilteredDeg = ShooterConstants.kHoodMinAngleDeg;
 
     /**
-     * Target shooter RPM (POV / dashboard). Motors only track this in {@link #periodic()} while a command
-     * requires this subsystem so the setpoint can be tuned without spinning until a shot runs.
+     * Target shooter RPM (KNN / POV / dashboard). Flywheels only run in {@link #periodic()} while
+     * {@link #shootFlywheelVelocityEnabled} is true (shot or explicit spin test).
      */
     private double shooterRpmSetpoint = 0;
     /** True when slider/NetworkTables setpoint inputs should drive hood/RPM setpoints. */
     private boolean dashboardSetpointControlEnabled = true;
     /**
-     * After manual hood steps (subsystem POV / dashboard), KNN driving hood while idle is skipped until
-     * a shot applies hood again or the hood stows after a profile ({@link #clearKnnHoodManualTuneBlock()}).
+     * When true, closed-loop flywheel velocity tracks {@link #shooterRpmSetpoint}. False while driving so KNN
+     * can hold a nonzero RPM target without spinning wheels until a shot sequence enables this flag.
      */
-    private boolean knnHoodBlockedAfterManualHoodTune;
+    private boolean shootFlywheelVelocityEnabled;
 
     private final NetworkTable shooterTable =
             NetworkTableInstance.getDefault().getTable("Shooter");
@@ -166,6 +166,7 @@ public class ShooterSubsystem extends SubsystemBase {
     public void setShooterRpm(double rpm) {
         shooterRpmSetpoint = Math.max(ShooterConstants.kShooterMinRpm,
                 Math.min(ShooterConstants.kShooterMaxRpm, rpm));
+        rpmSliderEntry.setDouble(shooterRpmSetpoint);
     }
 
     /** Current shooter RPM setpoint (0 when in open-loop). */
@@ -178,34 +179,23 @@ public class ShooterSubsystem extends SubsystemBase {
         dashboardSetpointControlEnabled = enabled;
     }
 
+    /** When true, flywheels run closed-loop to {@link #shooterRpmSetpoint}; false between shots while KNN still updates the setpoint. */
+    public void setShootFlywheelVelocityEnabled(boolean enabled) {
+        shootFlywheelVelocityEnabled = enabled;
+    }
+
+    public boolean isShootFlywheelVelocityEnabled() {
+        return shootFlywheelVelocityEnabled;
+    }
+
     /**
-     * Hood to minimum angle and align dashboard/filter/NT hood inputs after a shot profile ends.
-     * This is the normal path back to stowed hood; {@link #periodic()} does not auto-stow when idle.
+     * Hood to minimum angle and align dashboard/filter/NT hood inputs (e.g. emergency stow / legacy paths).
      */
     public void stowHoodAndSyncDashboardAfterProfile() {
         hoodDashboardSetpointFilteredDeg = ShooterConstants.kHoodMinAngleDeg;
         hoodSliderEntry.setDouble(ShooterConstants.kHoodMinAngleDeg);
         shooterTable.getEntry("hoodSetpointInput").setDouble(ShooterConstants.kHoodMinAngleDeg);
         setHoodAngle(ShooterConstants.kHoodMinAngleDeg);
-        clearKnnHoodManualTuneBlock();
-    }
-
-    /** Clears the block so {@link frc.robot.RobotContainer#applyKnnHoodInterpolation()} may set hood from the map again. */
-    public void clearKnnHoodManualTuneBlock() {
-        knnHoodBlockedAfterManualHoodTune = false;
-    }
-
-    /**
-     * When true, {@link frc.robot.RobotContainer#applyKnnHoodInterpolation()} must not set hood from the map.
-     * POV steps set true; teleop B (wing) sets true at sequence start; cleared when the shot ends.
-     */
-    public void setKnnHoodBlockedAfterManualTune(boolean blocked) {
-        knnHoodBlockedAfterManualHoodTune = blocked;
-    }
-
-    /** When true, KNN idle hood interpolation must not overwrite the operator hood setpoint. */
-    public boolean isKnnHoodBlockedAfterManualTune() {
-        return knnHoodBlockedAfterManualHoodTune;
     }
 
     /** Average measured RPM of left and right shooter wheels (closed-loop velocity feedback). */
@@ -218,13 +208,11 @@ public class ShooterSubsystem extends SubsystemBase {
     /** Increment shooter RPM setpoint by {@link ShooterConstants#kShooterRpmIncrement}. */
     public void incrementShooterRpm() {
         setShooterRpm(shooterRpmSetpoint + ShooterConstants.kShooterRpmIncrement);
-        rpmSliderEntry.setDouble(shooterRpmSetpoint);
     }
 
     /** Decrement shooter RPM setpoint by {@link ShooterConstants#kShooterRpmIncrement}. */
     public void decrementShooterRpm() {
         setShooterRpm(shooterRpmSetpoint - ShooterConstants.kShooterRpmIncrement);
-        rpmSliderEntry.setDouble(shooterRpmSetpoint);
     }
 
     /**
@@ -247,7 +235,6 @@ public class ShooterSubsystem extends SubsystemBase {
 
     /** Increment hood angle setpoint by {@link ShooterConstants#kHoodDegreesIncrement}. */
     public void incrementHoodDegrees() {
-        knnHoodBlockedAfterManualHoodTune = true;
         setHoodAngle(hoodSetpointDeg + ShooterConstants.kHoodDegreesIncrement);
         hoodSliderEntry.setDouble(hoodSetpointDeg);
         hoodDashboardSetpointFilteredDeg = hoodSetpointDeg;
@@ -256,7 +243,6 @@ public class ShooterSubsystem extends SubsystemBase {
 
     /** Decrement hood angle setpoint by {@link ShooterConstants#kHoodDegreesIncrement}. */
     public void decrementHoodDegrees() {
-        knnHoodBlockedAfterManualHoodTune = true;
         setHoodAngle(hoodSetpointDeg - ShooterConstants.kHoodDegreesIncrement);
         hoodSliderEntry.setDouble(hoodSetpointDeg);
         hoodDashboardSetpointFilteredDeg = hoodSetpointDeg;
@@ -319,7 +305,6 @@ public class ShooterSubsystem extends SubsystemBase {
         hoodSetpointDeg = 0;
         hoodDashboardSetpointFilteredDeg = 0;
         hoodSliderEntry.setDouble(hoodSetpointDeg);
-        clearKnnHoodManualTuneBlock();
     }
 
     /**
@@ -354,8 +339,7 @@ public class ShooterSubsystem extends SubsystemBase {
         boolean noShooterCommand = cs.requiring(this) == null;
 
         if (dashboardSetpointControlEnabled && noShooterCommand) {
-            // Hood/RPM from robot-dashboard (NT) or Shuffleboard; hood is not auto-stowed here—only
-            // stowHoodAndSyncDashboardAfterProfile() after shot sequences resets to min.
+            // Hood/RPM from robot-dashboard (NT) or Shuffleboard when no KNN map / interpolation off.
             double hoodInput = shooterTable.getEntry("hoodSetpointInput").getDouble(Double.NaN);
             double hoodToApply =
                     Double.isNaN(hoodInput) ? hoodSliderEntry.getDouble(hoodSetpointDeg) : hoodInput;
@@ -373,7 +357,7 @@ public class ShooterSubsystem extends SubsystemBase {
             setShooterRpm(rpmToApply);
         }
 
-        if (!noShooterCommand && shooterRpmSetpoint != 0) {
+        if (shootFlywheelVelocityEnabled && shooterRpmSetpoint != 0) {
             double rps = shooterRpmSetpoint / 60.0;
             shooterLeft.setControl(shooterVelocityRequest.withVelocity(rps));
             shooterRight.setControl(shooterVelocityRequest.withVelocity(rps));

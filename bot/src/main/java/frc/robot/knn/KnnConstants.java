@@ -49,4 +49,17 @@ public final class KnnConstants {
      * geometric nearest neighbor.
      */
     public static final double kNearestIndexHysteresisM = 0.12;
+
+    /**
+     * Field width along Y (m) for KNN mirror — must match dashboard {@code FIELD_WIDTH_M} when mirroring
+     * points in {@code knnFieldMirror.ts} (reflection {@code y' = W - y}).
+     */
+    public static final double kFieldWidthYMeters = 8.23;
+
+    /**
+     * When true and DS alliance is Red, KNN distance uses pose {@code (x, W - y)} so symmetric red-side
+     * positions match blue-recorded {@code knn_map.json} rows. This is field reflection, not Limelight
+     * {@code botpose_wpired} (different origin).
+     */
+    public static final boolean kMirrorPoseYForRedAllianceKnnLookup = true;
 }

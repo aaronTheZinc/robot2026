@@ -1,28 +1,20 @@
-import { app, BrowserWindow } from "electron";
-import path from "node:path";
-function createWindow() {
-  const mainWindow = new BrowserWindow({
+import { app as e, BrowserWindow as o } from "electron";
+import t from "node:path";
+function i() {
+  const n = new o({
     width: 1280,
     height: 800,
     webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true
+      nodeIntegration: !1,
+      contextIsolation: !0
     }
   });
-  if (process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-  } else {
-    mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
-  }
+  process.env.VITE_DEV_SERVER_URL ? n.loadURL(process.env.VITE_DEV_SERVER_URL) : n.loadFile(t.join(__dirname, "../dist/index.html"));
 }
-app.whenReady().then(createWindow);
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+e.whenReady().then(i);
+e.on("window-all-closed", () => {
+  process.platform !== "darwin" && e.quit();
 });
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+e.on("activate", () => {
+  o.getAllWindows().length === 0 && i();
 });

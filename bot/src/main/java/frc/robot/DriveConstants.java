@@ -7,6 +7,8 @@ package frc.robot;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.DriverStation.Alliance;
 
 /**
  * Motor test constants for the drivetrain (drive and steer modules).
@@ -113,12 +115,10 @@ public final class DriveConstants {
      * {@link #kTeleopHubAlignToleranceDeg}. Uses {@link #kTeleopRotationStickSign} so hub assist matches
      * teleop rotation direction, and {@link #kTeleopHubAlignOmegaSign} if chassis omega is inverted vs error.
      *
-     * @param hubHeadingOffsetDeg additive field heading (deg) on top of {@link #rotationToFaceHubFromShotMap}
-     *     — e.g. distance-scaled correction from {@link HubAlignCalibration}
+     * @param hubHeadingOffsetDeg additive field heading (deg) on top of the true hub bearing
      */
     public static double teleopOmegaTowardHub(Pose2d robotPose, double hubHeadingOffsetDeg) {
-        Rotation2d target =
-                rotationToFaceHubFromShotMap(robotPose).plus(Rotation2d.fromDegrees(hubHeadingOffsetDeg));
+        Rotation2d target = rotationToFaceHubForShooting(robotPose, hubHeadingOffsetDeg);
         double errorRad =
                 MathUtil.angleModulus(target.getRadians() - robotPose.getRotation().getRadians());
         if (Math.abs(errorRad) <= Math.toRadians(kTeleopHubAlignToleranceDeg)) {
@@ -161,9 +161,13 @@ public final class DriveConstants {
 
     // ----- Hub / goal (field pose, same frame as PathPlanner / fused odometry — blue alliance WPILib) -----
 
-    /** Hub center X (m). */
+    /** Full field length X (m), blue-origin WPILib field frame. */
+    public static final double kFieldLengthXMeters = 16.46;
+    /** Full field width Y (m), blue-origin WPILib field frame. */
+    public static final double kFieldWidthYMeters = 8.23;
+    /** Blue-side hub center X (m). */
     public static final double kHubFieldXMeters = 4.62;
-    /** Hub center Y (m). */
+    /** Blue-side hub center Y (m). */
     public static final double kHubFieldYMeters = 4.0;
 
     /**
@@ -173,45 +177,23 @@ public final class DriveConstants {
     public static final double kHubFacingBearingOffsetDegrees = 0.0;
 
     /**
-     * Mean signed angular error (rad) of tuned {@code knn_map.json} headings vs pure geometry toward the hub,
-     * after merging rows like {@link frc.robot.knn.KnnInterpreter} (≈1.59°). Mean absolute error ≈ 8.2°.
-     */
-    public static final double kHubShotMapMeanHeadingErrorRadians = 0.027737;
-
-    /**
-     * Least-squares additive heading correction (rad) vs {@code (dx, dy)} = hub − robot (m), fit from merged
-     * {@code knn_map.json} samples: {@code offset ≈ a + b·dx + c·dy}. Residual RMSE ≈ 9.2° (map is sparse).
-     */
-    public static final double kHubShotMapHeadingOffsetA = -0.024117514387849173;
-
-    public static final double kHubShotMapHeadingOffsetPerMeterDx = 0.015164153162676098;
-    public static final double kHubShotMapHeadingOffsetPerMeterDy = 0.03551452819037583;
-
-    /**
      * Heading to hold so the scoring side faces the hub (field frame), from fused pose.
      * Bearing is toward hub plus {@link #kHubFacingBearingOffsetDegrees}.
      */
     public static Rotation2d rotationToFaceHub(Pose2d robotPose) {
-        return rotationToFaceFieldPoint(robotPose, kHubFieldXMeters, kHubFieldYMeters);
+        return rotationToFaceFieldPoint(robotPose, hubTargetXMeters(), hubTargetYMeters());
+    }
+
+    /** Alias kept for callers; returns the true geometric bearing to the hub center. */
+    public static Rotation2d rotationToFaceHubFromShotMap(Pose2d robotPose) {
+        return rotationToFaceHub(robotPose);
     }
 
     /**
-     * Continuous approximation of tuned shot heading toward the hub: geometric bearing plus a linear-in-
-     * position correction from {@code knn_map.json} (same dx/dy convention as {@link #rotationToFaceFieldPoint}).
-     * Use {@link #rotationToFaceHub} for pure geometry.
+     * Full shooting aim heading: true hub-center bearing plus any caller-provided field-heading adjustment.
      */
-    public static Rotation2d rotationToFaceHubFromShotMap(Pose2d robotPose) {
-        double dx = kHubFieldXMeters - robotPose.getX();
-        double dy = kHubFieldYMeters - robotPose.getY();
-        if (dx * dx + dy * dy < 1e-8) {
-            return robotPose.getRotation();
-        }
-        double offsetRad =
-                kHubShotMapHeadingOffsetA
-                        + kHubShotMapHeadingOffsetPerMeterDx * dx
-                        + kHubShotMapHeadingOffsetPerMeterDy * dy;
-        Rotation2d toward = Rotation2d.fromRadians(Math.atan2(dy, dx) + offsetRad);
-        return toward.plus(Rotation2d.fromDegrees(kHubFacingBearingOffsetDegrees));
+    public static Rotation2d rotationToFaceHubForShooting(Pose2d robotPose, double extraHeadingOffsetDeg) {
+        return rotationToFaceHub(robotPose).plus(Rotation2d.fromDegrees(extraHeadingOffsetDeg));
     }
 
     /**
@@ -227,6 +209,20 @@ public final class DriveConstants {
         }
         Rotation2d toward = Rotation2d.fromRadians(Math.atan2(dy, dx));
         return toward.plus(Rotation2d.fromDegrees(kHubFacingBearingOffsetDegrees));
+    }
+
+    /** Active alliance hub X (m) in the WPILib blue-origin field frame. */
+    public static double hubTargetXMeters() {
+        return isRedAlliance() ? kFieldLengthXMeters - kHubFieldXMeters : kHubFieldXMeters;
+    }
+
+    /** Active alliance hub Y (m) in the WPILib blue-origin field frame. */
+    public static double hubTargetYMeters() {
+        return isRedAlliance() ? kFieldWidthYMeters - kHubFieldYMeters : kHubFieldYMeters;
+    }
+
+    private static boolean isRedAlliance() {
+        return DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red;
     }
 
     // ----- Limelight MegaTag2 → Phoenix pose estimator (addVisionMeasurement) -----
