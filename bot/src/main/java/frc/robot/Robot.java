@@ -137,11 +137,11 @@ public class Robot extends TimedRobot {
             // this (see seedOdometryForAuto).
             m_robotContainer.getShooter().setShooterReady(false);
             m_robotContainer.seedOdometryForAuto(selectedAuto);
-            Command hoodHoming = m_robotContainer.getHoodHomingCommand();
+            Command homing = m_robotContainer.getEnableHomingSequenceCommand();
             if (selectedAuto != null) {
-                m_autonomousCommand = hoodHoming.andThen(selectedAuto).withName("AutoWithHoodHoming");
+                m_autonomousCommand = homing.andThen(selectedAuto).withName("AutoWithHoming");
             } else {
-                m_autonomousCommand = hoodHoming.withName("HoodHomingOnly");
+                m_autonomousCommand = homing;
             }
         }
 
@@ -181,8 +181,7 @@ public class Robot extends TimedRobot {
             m_robotContainer.getShooter().setShooterReady(true);
             m_robotContainer.getIntake().setPivotReady(true);
         } else {
-            CommandScheduler.getInstance().schedule(m_robotContainer.getHoodHomingCommand());
-            // CommandScheduler.getInstance().schedule(m_robotContainer.getPivotHomingCommand());
+            CommandScheduler.getInstance().schedule(m_robotContainer.getEnableHomingSequenceCommand());
         }
     }
 

@@ -32,6 +32,7 @@ import {
 } from './lib/robotState';
 import type { RobotMode, RobotStateUpdate } from './lib/robotState';
 import {
+  knnMapPointCellIndex,
   normalizeKnnShootTarget,
   type KnnPoint,
   type KnnShootTarget,
@@ -40,6 +41,7 @@ import {
   mirrorKnnPoints,
   type MirrorFilter,
 } from './lib/knnFieldMirror';
+import { normalizeHeadingDeg } from './lib/hubField';
 import {
   newSimDropTargetId,
   normalizeSimDropTargets,
@@ -519,6 +521,66 @@ function App() {
     [mode]
   );
 
+  const handleMockSimKeyboardDrive = useCallback(
+    (payload: {
+      dx: number;
+      dy: number;
+      dHeadingDeg: number;
+      speedMps: number;
+    }) => {
+      if (mode !== 'mock') {
+        return;
+      }
+      setState((prev) =>
+        applyRobotStateUpdate(
+          prev,
+          {
+            swerve: {
+              x: Math.max(0, Math.min(FIELD_LENGTH_M, prev.swerve.x + payload.dx)),
+              y: Math.max(0, Math.min(FIELD_WIDTH_M, prev.swerve.y + payload.dy)),
+              headingDeg: normalizeHeadingDeg(prev.swerve.headingDeg + payload.dHeadingDeg),
+              speedMps: payload.speedMps,
+            },
+          },
+          Date.now()
+        )
+      );
+    },
+    [mode]
+  );
+
+  const handleMockSimPatchSwerve = useCallback(
+    (patch: { x?: number; y?: number; headingDeg?: number }) => {
+      if (mode !== 'mock') {
+        return;
+      }
+      setState((prev) =>
+        applyRobotStateUpdate(
+          prev,
+          {
+            swerve: {
+              x:
+                patch.x !== undefined
+                  ? Math.max(0, Math.min(FIELD_LENGTH_M, patch.x))
+                  : prev.swerve.x,
+              y:
+                patch.y !== undefined
+                  ? Math.max(0, Math.min(FIELD_WIDTH_M, patch.y))
+                  : prev.swerve.y,
+              headingDeg:
+                patch.headingDeg !== undefined
+                  ? normalizeHeadingDeg(patch.headingDeg)
+                  : prev.swerve.headingDeg,
+              speedMps: 0,
+            },
+          },
+          Date.now()
+        )
+      );
+    },
+    [mode]
+  );
+
   const loadKnnLog = (file: File | null) => {
     if (!file) return;
     const reader = new FileReader();
@@ -553,6 +615,31 @@ function App() {
       )
     );
   };
+
+  const applyKnnRpmDeltaToCells = useCallback(
+    (cells: { ci: number; cj: number }[], deltaRpm: number) => {
+      if (cells.length === 0 || !Number.isFinite(deltaRpm)) {
+        return;
+      }
+      const selected = new Set(cells.map((c) => `${c.ci},${c.cj}`));
+      persistKnnMap(
+        loggedPoints.map((pt) => {
+          const { ci, cj } = knnMapPointCellIndex(
+            pt.x,
+            pt.y,
+            FIELD_LENGTH_M,
+            FIELD_WIDTH_M
+          );
+          if (!selected.has(`${ci},${cj}`)) {
+            return pt;
+          }
+          const base = pt.shooterRpm ?? 0;
+          return { ...pt, shooterRpm: Math.round(base + deltaRpm) };
+        })
+      );
+    },
+    [loggedPoints]
+  );
 
   const removeKnnPoint = (index: number) => {
     persistKnnMap(loggedPoints.filter((_, pointIndex) => pointIndex !== index));
@@ -626,6 +713,24 @@ function App() {
       return next;
     });
   }, []);
+
+  const handleAddShotSample = useCallback(
+    (fieldX: number, fieldY: number): number => {
+      const x = Math.max(0, Math.min(FIELD_LENGTH_M, fieldX));
+      const y = Math.max(0, Math.min(FIELD_WIDTH_M, fieldY));
+      const newPoint: KnnPoint = {
+        x,
+        y,
+        headingDeg: 0,
+        shooterRpm: 0,
+        hoodDeg: 0,
+      };
+      const newIndex = loggedPoints.length;
+      persistKnnMap([...loggedPoints, newPoint]);
+      return newIndex;
+    },
+    [loggedPoints]
+  );
 
   useEffect(() => {
     setState((prev) => applyRobotStateUpdate(prev, { mode }, Date.now()));
@@ -1070,6 +1175,7 @@ function App() {
             isRedAlliance={state.driverStation.isRedAlliance}
             onPointChange={updateKnnPoint}
             onPointRemove={removeKnnPoint}
+            onApplyRpmDeltaToCells={applyKnnRpmDeltaToCells}
             robotSelectedIndex={
               state.knnSelectedIndex >= 0 ? state.knnSelectedIndex : null
             }
@@ -1160,8 +1266,12 @@ function App() {
           onRemoveDropTarget={handleSimRemoveDropTarget}
           onSelectDropForAim={handleSimSelectDropForAim}
           mockMode={mode === 'mock'}
+          fieldRelative={state.swerve.fieldRelative}
+          onMockSimKeyboardDrive={handleMockSimKeyboardDrive}
+          onMockSimPatchSwerve={handleMockSimPatchSwerve}
           onApplyMockShotFromSim={handleApplyMockShotFromSim}
           onSaveKnnShootTarget={handleSaveKnnShootTarget}
+          onAddShotSample={handleAddShotSample}
         />
       )}
 
@@ -1355,7 +1465,27 @@ function App() {
               <div className="metric-label">Deployed</div>
               <div className="metric-value">{state.intake.deployed ? 'Down' : 'Up'}</div>
             </div>
+            <div>
+              <div className="metric-label">Pivot encoder (rot)</div>
+              <div className="metric-value">{formatNumber(state.intake.pivotPositionRot, 3)}</div>
+            </div>
+            <div>
+              <div className="metric-label">Stow setpoint (rot)</div>
+              <div className="metric-value">{formatNumber(state.intake.pivotStowSetpointRot, 3)}</div>
+            </div>
+            <div>
+              <div className="metric-label">Collect setpoint (rot)</div>
+              <div className="metric-value">{formatNumber(state.intake.pivotCollectSetpointRot, 3)}</div>
+            </div>
+            <div>
+              <div className="metric-label">Pivot homed</div>
+              <div className="metric-value">{state.intake.pivotReady ? 'Yes' : 'No'}</div>
+            </div>
           </div>
+          <p className="panel-hint">
+            Gamepad 2: <strong>Y</strong> → stow setpoint, <strong>X</strong> → collect setpoint (after robot pivot
+            homing sets encoders).
+          </p>
           <div className="button-row">
             <button onClick={() => applyUpdate({ intake: { enabled: !state.intake.enabled } })}>
               {state.intake.enabled ? 'Disable' : 'Enable'}

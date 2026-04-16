@@ -238,6 +238,34 @@ const DEFAULT_TOPICS: TopicConfig[] = [
       typeof value === 'number' ? { intake: { rollerRpm: value } } : null,
   },
   {
+    path: '/Intake/pivotPositionRot',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { intake: { pivotPositionRot: value } } : null,
+  },
+  {
+    path: '/Intake/pivotStowSetpointRot',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { intake: { pivotStowSetpointRot: value } } : null,
+  },
+  {
+    path: '/Intake/pivotCollectSetpointRot',
+    type: NetworkTablesTypeInfos.kDouble,
+    defaultValue: 0,
+    map: (value) =>
+      typeof value === 'number' ? { intake: { pivotCollectSetpointRot: value } } : null,
+  },
+  {
+    path: '/Intake/pivotReady',
+    type: NetworkTablesTypeInfos.kBoolean,
+    defaultValue: false,
+    map: (value) =>
+      typeof value === 'boolean' ? { intake: { pivotReady: value } } : null,
+  },
+  {
     path: '/Shooter/enabled',
     type: NetworkTablesTypeInfos.kBoolean,
     defaultValue: false,

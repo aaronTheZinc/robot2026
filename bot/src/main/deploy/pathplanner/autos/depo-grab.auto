@@ -13,6 +13,12 @@
                 "data": {
                   "pathName": "depo"
                 }
+              },
+              {
+                "type": "named",
+                "data": {
+                  "name": "Intake Down"
+                }
               }
             ]
           }
@@ -21,12 +27,6 @@
           "type": "named",
           "data": {
             "name": "Point and Shoot Depo"
-          }
-        },
-        {
-          "type": "named",
-          "data": {
-            "name": "Heading 0"
           }
         },
         {

@@ -31,10 +31,10 @@ import java.util.Optional;
 import frc.robot.ShooterConstants;
 
 /**
- * Loads {@code deploy/knn_map.json}, finds the nearest map point to the robot pose, and publishes
- * inverse-distance-weighted (IDW) shooter RPM and hood. On red alliance, optional Y-mirror
- * ({@link KnnConstants#kMirrorPoseYForRedAllianceKnnLookup}) maps symmetric field positions into the
- * same frame as blue-recorded points — not Limelight WPIRed. Map rows with non-positive RPM are dropped; nearby
+ * Loads {@code deploy/knn_map.json}, finds the nearest map point to the fused robot pose (WPIBlue), and publishes
+ * inverse-distance-weighted (IDW) shooter RPM and hood. Optional field mirror for red alliance
+ * ({@link KnnConstants#kMirrorPoseAcrossFieldForRedAllianceKnnLookup}) maps {@code (L-x, W-y)} for lookup when the
+ * map was recorded from the blue half. Map rows with non-positive RPM are dropped; nearby
  * duplicate positions are merged (average). Outputs are clamped to the map's hood/RPM envelope, blended toward
  * the nearest row when far from data ({@link KnnConstants#kIdwBlendFullNeighborBeyondM}), then slewed with
  * {@link KnnConstants#kHoodInterpMaxRateDegPerSec} / {@link KnnConstants#kShooterRpmInterpMaxRatePerSec}.
@@ -49,9 +49,8 @@ import frc.robot.ShooterConstants;
  *   <li>{@code nearestShooterRpm}, {@code nearestHoodDeg} — from the single nearest point
  *   <li>{@code interpolatedShooterRpm}, {@code interpolatedHoodDeg} — raw IDW blend from {@link KnnConstants#kIdwNearestCount}
  *       nearest points (pre-slew target); {@code smoothedHoodDeg} / {@code smoothedShooterRpm} are what the robot uses
- *   <li>{@code nearestIndexBlue}, {@code nearestIndexRed} — geometric nearest map row for raw pose vs Y-mirrored pose
- *       (see {@link #mirrorPoseYForRedLookup}); both are published so the dashboard can show red vs blue inference
- *       for the same robot position.
+ *   <li>{@code nearestIndexBlue}, {@code nearestIndexRed} — geometric nearest to raw pose vs mirrored lookup pose;
+ *       when field-mirror lookup is off both match.
  * </ul>
  */
 public class KnnInterpreter {
@@ -70,7 +69,7 @@ public class KnnInterpreter {
     private final DoublePublisher smoothedRpmPub;
     /** Geometric nearest map index using raw WPIBlue pose (no alliance mirror). */
     private final IntegerPublisher nearestIndexBluePub;
-    /** Geometric nearest map index using Y-mirrored pose {@code y' = W - y} (red-side lookup frame). */
+    /** Duplicate of nearest blue index when mirror lookup is off; else Y-mirrored pose nearest (legacy). */
     private final IntegerPublisher nearestIndexRedPub;
 
     private int lastSelectedIndex = -1;
@@ -439,16 +438,13 @@ public class KnnInterpreter {
 
         int idxBlue = points.isEmpty() ? -1 : findNearestIndex(fusedFieldPose);
         int idxRed =
-                points.isEmpty()
-                        ? -1
-                        : findNearestIndex(mirrorPoseYForRedLookup(fusedFieldPose));
+                KnnConstants.kMirrorPoseAcrossFieldForRedAllianceKnnLookup
+                        ? (points.isEmpty()
+                                ? -1
+                                : findNearestIndex(poseForKnnLookup(fusedFieldPose)))
+                        : idxBlue;
         nearestIndexBluePub.set(idxBlue);
         nearestIndexRedPub.set(idxRed);
-    }
-
-    private static Pose2d mirrorPoseYForRedLookup(Pose2d fused) {
-        double w = KnnConstants.kFieldWidthYMeters;
-        return new Pose2d(fused.getX(), w - fused.getY(), fused.getRotation());
     }
 
     /**
@@ -460,18 +456,19 @@ public class KnnInterpreter {
     }
 
     /**
-     * Red alliance: mirror Y across field width so distance to blue-recorded map rows matches symmetric
-     * red-side shots ({@code y' = W - y}, {@link KnnConstants#kFieldWidthYMeters}). Blue / no alliance: identity.
+     * When {@link KnnConstants#kMirrorPoseAcrossFieldForRedAllianceKnnLookup} is true and DS is red:
+     * {@code x' = L - x}, {@code y' = W - y}. Otherwise returns fused pose (WPIBlue) unchanged.
      */
     private static Pose2d poseForKnnLookup(Pose2d fused) {
-        if (!KnnConstants.kMirrorPoseYForRedAllianceKnnLookup) {
+        if (!KnnConstants.kMirrorPoseAcrossFieldForRedAllianceKnnLookup) {
             return fused;
         }
         if (DriverStation.getAlliance().orElse(Alliance.Blue) != Alliance.Red) {
             return fused;
         }
-        double w = KnnConstants.kFieldWidthYMeters;
-        return new Pose2d(fused.getX(), w - fused.getY(), fused.getRotation());
+        double L = KnnConstants.kFieldLengthXMeters;
+        double W = KnnConstants.kFieldWidthYMeters;
+        return new Pose2d(L - fused.getX(), W - fused.getY(), fused.getRotation());
     }
 
     /**

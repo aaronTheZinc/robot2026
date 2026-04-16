@@ -258,6 +258,80 @@
   font-weight: 600;
 }
 
+.simulation-mock-pose-hint {
+  margin-top: 0;
+}
+
+.simulation-mock-pose-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.simulation-mock-pose-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.simulation-mock-pose-field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background: #0f172a;
+  color: #f1f5f9;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.simulation-mock-pose-field input:focus {
+  outline: none;
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35);
+}
+
+.simulation-mock-pose-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.simulation-mock-pose-apply,
+.simulation-mock-pose-reset {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.simulation-mock-pose-apply {
+  border-color: #38bdf8;
+  background: #0c4a6e;
+  color: #f0f9ff;
+}
+
+.simulation-mock-pose-apply:hover {
+  background: #075985;
+}
+
+.simulation-mock-pose-reset:hover {
+  background: #334155;
+}
+
 .simulation-aim-origin-list {
   list-style: none;
   margin: 0 0 12px;
@@ -626,12 +700,26 @@
   left: 0;
   right: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
   padding: 12px 20px;
   background: linear-gradient(to top, rgba(10, 12, 18, 0.95), transparent);
   pointer-events: none;
+}
+
+.simulation-overlay-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.simulation-mock-keys-hint {
+  font-size: 0.72rem;
+  color: #a5b4fc;
+  line-height: 1.35;
+  max-width: min(420px, 46vw);
 }
 
 .simulation-badge {
@@ -793,6 +881,13 @@
 .panel h2 {
   margin: 0;
   font-size: 1.1rem;
+}
+
+.panel-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #94a3b8;
+  line-height: 1.45;
 }
 
 .status-pill {
@@ -1396,6 +1491,39 @@
 
 .knn-cell-robot-selected {
   box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.9);
+}
+
+.knn-cell-selectable {
+  cursor: pointer;
+}
+
+.knn-cell-region-selected {
+  box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.95);
+  background: rgba(139, 92, 246, 0.22);
+}
+
+.knn-region-rpm-bar {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+
+.knn-region-rpm-bar label {
+  margin: 0;
+}
+
+.knn-rpm-delta-input {
+  width: 5.5rem;
+}
+
+.knn-region-rpm-meta {
+  font-size: 0.8rem;
+  color: #9aa3c0;
+}
+
+.knn-points-table tr.knn-row-region-selected td {
+  background: rgba(139, 92, 246, 0.12);
 }
 
 .knn-grid-hint {

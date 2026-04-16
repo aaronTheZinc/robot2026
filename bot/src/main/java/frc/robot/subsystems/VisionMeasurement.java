@@ -36,7 +36,7 @@ import frc.robot.VisionConstants;
  * Fused {@link Pose2d} struct on NetworkTables: {@code /SmartDashboard/Odometry/FusedPose}.
  * <p>
  * Debug: {@code Pose/idealShooterPose} — {@code [x, y]} copied from fused odometry; {@code headingDeg} is
- * the geometric heading from the current pose to the true hub center.
+ * the shot-map hub-facing heading (same model as the robot dashboard / {@code hubField.ts}).
  */
 public class VisionMeasurement extends SubsystemBase {
     private static final String[] kCommonSecondaryLimelightAliases = {"limelight2", "limelight-front"};
@@ -150,13 +150,13 @@ public class VisionMeasurement extends SubsystemBase {
         m_useMegaTag2 = useMegaTag2;
     }
 
-    /** Primary + secondary names from {@link VisionConstants}, MegaTag2. */
+    /** Primary + secondary names from {@link VisionConstants}; MegaTag mode from {@link VisionConstants#kUseMegaTag2}. */
     public VisionMeasurement(CommandSwerveDrivetrain drivetrain) {
         this(
                 drivetrain,
                 VisionConstants.kPrimaryLimelightName,
                 VisionConstants.kSecondaryLimelightName,
-                true);
+                VisionConstants.kUseMegaTag2);
     }
 
     /** Primary Limelight {@code tv} ≥ 1 or secondary (if configured): pipeline has a valid target. */
@@ -500,7 +500,7 @@ public class VisionMeasurement extends SubsystemBase {
 
         double odometryX = pose.getX();
         double odometryY = pose.getY();
-        var hubFacingRotation = DriveConstants.rotationToFaceHub(pose);
+        var hubFacingRotation = DriveConstants.rotationToFaceHubFromShotMap(pose);
         m_idealShooterPose[0] = odometryX;
         m_idealShooterPose[1] = odometryY;
         m_idealShooterPose[2] = hubFacingRotation.getDegrees();

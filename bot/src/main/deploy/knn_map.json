@@ -3,7 +3,7 @@
     "x": 1.6825829654684552,
     "y": 3.6472849598959383,
     "headingDeg": -0.01643104437731596,
-    "shooterRpm": 3600,
+    "shooterRpm": 3800,
     "hoodDeg": 1.386206417119655,
     "shootTarget": {
       "kind": "hub"
@@ -13,7 +13,7 @@
     "x": 1.066263388545465,
     "y": 3.667719773376272,
     "headingDeg": -1.6946719826861005,
-    "shooterRpm": 4000,
+    "shooterRpm": 4200,
     "hoodDeg": 8.906994233247,
     "shootTarget": {
       "kind": "hub"
@@ -23,7 +23,7 @@
     "x": 1.0937276545394305,
     "y": 4.54735766790026,
     "headingDeg": -17.32596910197353,
-    "shooterRpm": 3900,
+    "shooterRpm": 4100,
     "hoodDeg": 4.084661185912741,
     "shootTarget": {
       "kind": "hub"
@@ -33,7 +33,7 @@
     "x": 1.2486564966430995,
     "y": 5.467229779960479,
     "headingDeg": -29.17151484416105,
-    "shooterRpm": 3900,
+    "shooterRpm": 4100,
     "hoodDeg": 11.931778906046356,
     "shootTarget": {
       "kind": "hub"
@@ -43,7 +43,7 @@
     "x": 0.7258011025974798,
     "y": 6.378432722425083,
     "headingDeg": -40.8880828806064,
-    "shooterRpm": 4000,
+    "shooterRpm": 4200,
     "hoodDeg": 29.03127186641487,
     "shootTarget": {
       "kind": "hub"
@@ -63,7 +63,7 @@
     "x": 1.9753323137475105,
     "y": 6.517687953932425,
     "headingDeg": -61.42693606810639,
-    "shooterRpm": 4000,
+    "shooterRpm": 4200,
     "hoodDeg": 16.501762832277215,
     "shootTarget": {
       "kind": "hub"
@@ -73,7 +73,7 @@
     "x": 0.8872295505150476,
     "y": 6.523919621407462,
     "headingDeg": -49.55616884545013,
-    "shooterRpm": 4000,
+    "shooterRpm": 4200,
     "hoodDeg": 29.873788939056293,
     "shootTarget": {
       "kind": "hub"
@@ -83,7 +83,7 @@
     "x": 0.8872295505150476,
     "y": 6.523919621407462,
     "headingDeg": -49.55616884545013,
-    "shooterRpm": 4000,
+    "shooterRpm": 4200,
     "hoodDeg": 29.873788939056293,
     "shootTarget": {
       "kind": "hub"
@@ -93,7 +93,7 @@
     "x": -0.7524740223248796,
     "y": 6.587672447544756,
     "headingDeg": -20.937087486128803,
-    "shooterRpm": 4300,
+    "shooterRpm": 4500,
     "hoodDeg": 32.25717799979021,
     "shootTarget": {
       "kind": "hub"
@@ -103,7 +103,7 @@
     "x": -0.4093126715612647,
     "y": 7.150160095288076,
     "headingDeg": -27.431615118973102,
-    "shooterRpm": 4400,
+    "shooterRpm": 4600,
     "hoodDeg": 36.208739023244455,
     "shootTarget": {
       "kind": "hub"
@@ -113,7 +113,7 @@
     "x": 0.5522861298350481,
     "y": 7.167851519474965,
     "headingDeg": -38.16240808381684,
-    "shooterRpm": 4100,
+    "shooterRpm": 4300,
     "hoodDeg": 36.590741480379684,
     "shootTarget": {
       "kind": "hub"
@@ -123,7 +123,7 @@
     "x": 1.1928477176275165,
     "y": 7.268942357705493,
     "headingDeg": -41.4772777986606,
-    "shooterRpm": 4000,
+    "shooterRpm": 4200,
     "hoodDeg": 12,
     "shootTarget": {
       "kind": "hub"
@@ -173,7 +173,7 @@
     "x": 0.8914134574021828,
     "y": 2.8654932346453723,
     "headingDeg": 40.37034383744735,
-    "shooterRpm": 4053.029972290923,
+    "shooterRpm": 4253,
     "hoodDeg": 6.9182034912106785,
     "shootTarget": {
       "kind": "hub"
@@ -183,7 +183,7 @@
     "x": 0.6496638447119572,
     "y": 1.0529003038438325,
     "headingDeg": 55.10252647013533,
-    "shooterRpm": 4553.029972290923,
+    "shooterRpm": 4753,
     "hoodDeg": 21.08957208143938,
     "shootTarget": {
       "kind": "hub"
@@ -193,7 +193,7 @@
     "x": 0.6496638447119572,
     "y": 1.0529003038438325,
     "headingDeg": 55.10252647013533,
-    "shooterRpm": 4553.029972290923,
+    "shooterRpm": 4753,
     "hoodDeg": 21.08957208143938,
     "shootTarget": {
       "kind": "hub"
@@ -203,7 +203,7 @@
     "x": 1.0937276545394305,
     "y": 3.68264233209974,
     "headingDeg": 17.32596910197353,
-    "shooterRpm": 3900,
+    "shooterRpm": 4100,
     "hoodDeg": 4.084661185912741,
     "shootTarget": {
       "kind": "hub"
@@ -213,7 +213,7 @@
     "x": 1.2486564966430995,
     "y": 2.7627702200395214,
     "headingDeg": 29.17151484416105,
-    "shooterRpm": 3900,
+    "shooterRpm": 4100,
     "hoodDeg": 11.931778906046356,
     "shootTarget": {
       "kind": "hub"
@@ -223,7 +223,7 @@
     "x": 0.7258011025974798,
     "y": 1.851567277574917,
     "headingDeg": 40.8880828806064,
-    "shooterRpm": 4000,
+    "shooterRpm": 4200,
     "hoodDeg": 29.03127186641487,
     "shootTarget": {
       "kind": "hub"
@@ -243,7 +243,7 @@
     "x": 1.9753323137475105,
     "y": 1.7123120460675754,
     "headingDeg": 61.42693606810639,
-    "shooterRpm": 4000,
+    "shooterRpm": 4200,
     "hoodDeg": 16.501762832277215,
     "shootTarget": {
       "kind": "hub"
@@ -253,7 +253,7 @@
     "x": 0.8872295505150476,
     "y": 1.7060803785925387,
     "headingDeg": 49.55616884545013,
-    "shooterRpm": 4000,
+    "shooterRpm": 4200,
     "hoodDeg": 29.873788939056293,
     "shootTarget": {
       "kind": "hub"
@@ -263,7 +263,7 @@
     "x": 0.8872295505150476,
     "y": 1.7060803785925387,
     "headingDeg": 49.55616884545013,
-    "shooterRpm": 4000,
+    "shooterRpm": 4200,
     "hoodDeg": 29.873788939056293,
     "shootTarget": {
       "kind": "hub"
@@ -273,7 +273,7 @@
     "x": -0.7524740223248796,
     "y": 1.642327552455244,
     "headingDeg": 20.937087486128803,
-    "shooterRpm": 4300,
+    "shooterRpm": 4500,
     "hoodDeg": 32.25717799979021,
     "shootTarget": {
       "kind": "hub"
@@ -283,7 +283,7 @@
     "x": -0.4093126715612647,
     "y": 1.0798399047119247,
     "headingDeg": 27.431615118973102,
-    "shooterRpm": 4400,
+    "shooterRpm": 4600,
     "hoodDeg": 36.208739023244455,
     "shootTarget": {
       "kind": "hub"
@@ -293,7 +293,7 @@
     "x": 0.5522861298350481,
     "y": 1.0621484805250354,
     "headingDeg": 38.16240808381684,
-    "shooterRpm": 4100,
+    "shooterRpm": 4300,
     "hoodDeg": 36.590741480379684,
     "shootTarget": {
       "kind": "hub"
@@ -303,7 +303,7 @@
     "x": 1.1928477176275165,
     "y": 0.9610576422945076,
     "headingDeg": 41.4772777986606,
-    "shooterRpm": 4000,
+    "shooterRpm": 4200,
     "hoodDeg": 12,
     "shootTarget": {
       "kind": "hub"

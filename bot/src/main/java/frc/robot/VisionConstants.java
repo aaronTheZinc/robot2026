@@ -27,7 +27,13 @@ package frc.robot;
 public final class VisionConstants {
     private VisionConstants() {}
 
-    /** Primary Limelight (MegaTag2 fusion in {@link frc.robot.subsystems.VisionMeasurement}). */
+    /**
+     * When {@code true}, vision fusion reads {@code botpose_orb_wpiblue} (MegaTag2). When {@code false},
+     * uses {@code botpose_wpiblue} (MegaTag1).
+     */
+    public static final boolean kUseMegaTag2 = false;
+
+    /** Primary Limelight (MegaTag fusion in {@link frc.robot.subsystems.VisionMeasurement}). */
     public static final String kPrimaryLimelightName = "limelight-back";
 
     /**

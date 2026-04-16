@@ -1,13 +1,10 @@
 /**
- * KNN inference for the dashboard: given chassis pose and logged points,
- * returns which point index is "inferred" (nearest) so the grid view and
- * robot interpreter can align on the same selection.
- *
- * Red alliance: matches {@code KnnInterpreter} / {@code KnnConstants#kMirrorPoseYForRedAllianceKnnLookup}
- * — distance uses pose {@code (x, W - y)} in the WPIBlue frame so blue-recorded map rows match.
+ * KNN inference for the dashboard: given chassis pose (WPIBlue, same as fused /Pose/robotPose) and logged
+ * points, returns which point index is nearest. Matches {@code KnnInterpreter} when
+ * {@code kMirrorPoseAcrossFieldForRedAllianceKnnLookup} is false: compare pose to map rows directly.
  */
 
-import { FIELD_WIDTH_M } from './fieldDimensions';
+import { FIELD_LENGTH_M, FIELD_WIDTH_M } from './fieldDimensions';
 
 /** Scoring / inspection aim for this map sample. Omitted or `hub` = hub shot (default). */
 export type KnnShootTarget =
@@ -70,51 +67,55 @@ export type KnnInferenceConfig = {
   /** Weight for rotation delta in degrees (default 0 = ignore rotation) */
   weightRotation?: number;
   /**
-   * When true (default), match on-robot KNN: on red alliance use {@code y' = fieldWidthM - y} for distance.
-   * Set false only for debugging.
+   * When true, on red alliance use {@code (L-x, W-y)} for distance (matches robot
+   * {@code kMirrorPoseAcrossFieldForRedAllianceKnnLookup}). Default true.
    */
   mirrorRedAllianceLookup?: boolean;
-  /** Field width W (m) for Y mirror; default {@link FIELD_WIDTH_M} (must match {@code KnnConstants.kFieldWidthYMeters}). */
+  /** Field width W (m); default {@link FIELD_WIDTH_M} (must match {@code KnnConstants.kFieldWidthYMeters}). */
   fieldWidthM?: number;
-  /** When true, apply Y mirror (red alliance in WPIBlue frame). */
+  /** Field length L (m); default {@link FIELD_LENGTH_M} (must match {@code KnnConstants.kFieldLengthXMeters}). */
+  fieldLengthM?: number;
+  /** When true, apply red-alliance field mirror for lookup (with {@code mirrorRedAllianceLookup}). */
   isRedAlliance?: boolean;
 };
 
 const DEFAULT_CONFIG: Required<
   Pick<KnnInferenceConfig, 'weightX' | 'weightY' | 'weightRotation' | 'mirrorRedAllianceLookup'>
-> & { fieldWidthM: number; isRedAlliance: boolean } = {
+> & { fieldWidthM: number; fieldLengthM: number; isRedAlliance: boolean } = {
   weightX: 1,
   weightY: 1,
   weightRotation: 0,
   mirrorRedAllianceLookup: true,
   fieldWidthM: FIELD_WIDTH_M,
+  fieldLengthM: FIELD_LENGTH_M,
   isRedAlliance: false,
 };
 
 /**
- * Same transform as {@code KnnInterpreter.poseForKnnLookup}: WPIBlue pose, red alliance uses {@code y' = W - y}.
+ * Optional field mirror for red alliance. When {@code mirrorRedAllianceLookup} is false, returns pose unchanged.
  */
 export function poseForKnnLookup(
   pose: { x: number; y: number; headingDeg?: number },
   options: {
     mirrorRedAllianceLookup?: boolean;
     fieldWidthM?: number;
+    fieldLengthM?: number;
     isRedAlliance?: boolean;
   } = {}
 ): { x: number; y: number; headingDeg?: number } {
   const mirror = options.mirrorRedAllianceLookup !== false;
   const w = options.fieldWidthM ?? FIELD_WIDTH_M;
+  const L = options.fieldLengthM ?? FIELD_LENGTH_M;
   const red = options.isRedAlliance === true;
   if (!mirror || !red) {
     return pose;
   }
-  return { ...pose, y: w - pose.y };
+  return { ...pose, x: L - pose.x, y: w - pose.y };
 }
 
 /**
- * Y coordinate (m) for placing a {@code knn_map.json} row on the WPIBlue field in the UI. Map rows are stored in
- * blue-side coordinates; on red alliance the robot compares using {@link poseForKnnLookup}, so markers and grid
- * cells should use the symmetric {@code W - y} so the selected sample appears on the correct half-field.
+ * Y coordinate (m) for placing a {@code knn_map.json} row on the field in the UI when the view is flipped for red
+ * alliance display. Map rows stay in WPIBlue storage; this only affects drawing.
  */
 export function knnMapPointFieldYForAlliance(
   mapY: number,
@@ -122,6 +123,29 @@ export function knnMapPointFieldYForAlliance(
   fieldWidthM: number = FIELD_WIDTH_M
 ): number {
   return isRedAlliance ? fieldWidthM - mapY : mapY;
+}
+
+/** Grid cell size (m) for the dashboard KNN spatial grid (1 m tiles over the field). */
+export const KNN_GRID_CELL_SIZE_M = 1.0;
+
+/**
+ * Which grid cell (WPIBlue) a map sample occupies — same indexing as {@code KnnGridView} cells.
+ * {@code ci} = column along field length X, {@code cj} = row along field width Y.
+ */
+export function knnMapPointCellIndex(
+  x: number,
+  y: number,
+  fieldLengthM: number,
+  fieldWidthM: number,
+  cellSizeM: number = KNN_GRID_CELL_SIZE_M
+): { ci: number; cj: number } {
+  const ci = Math.floor(
+    Math.max(0, Math.min(x, fieldLengthM - 1e-6)) / cellSizeM
+  );
+  const cj = Math.floor(
+    Math.max(0, Math.min(y, fieldWidthM - 1e-6)) / cellSizeM
+  );
+  return { ci, cj };
 }
 
 function distance(
@@ -168,6 +192,7 @@ export function inferKnn(
     ...DEFAULT_CONFIG,
     ...config,
     fieldWidthM: config.fieldWidthM ?? DEFAULT_CONFIG.fieldWidthM,
+    fieldLengthM: config.fieldLengthM ?? DEFAULT_CONFIG.fieldLengthM,
     mirrorRedAllianceLookup: config.mirrorRedAllianceLookup ?? DEFAULT_CONFIG.mirrorRedAllianceLookup,
     isRedAlliance: config.isRedAlliance ?? DEFAULT_CONFIG.isRedAlliance,
   };
@@ -177,6 +202,7 @@ export function inferKnn(
   const lookupPose = poseForKnnLookup(pose, {
     mirrorRedAllianceLookup: cfg.mirrorRedAllianceLookup,
     fieldWidthM: cfg.fieldWidthM,
+    fieldLengthM: cfg.fieldLengthM,
     isRedAlliance: cfg.isRedAlliance,
   });
 

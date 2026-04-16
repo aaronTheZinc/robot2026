@@ -50,6 +50,9 @@ public final class KnnConstants {
      */
     public static final double kNearestIndexHysteresisM = 0.12;
 
+    /** Field length along X (m), WPILib blue origin — match dashboard {@code FIELD_LENGTH_M}. */
+    public static final double kFieldLengthXMeters = 16.46;
+
     /**
      * Field width along Y (m) for KNN mirror — must match dashboard {@code FIELD_WIDTH_M} when mirroring
      * points in {@code knnFieldMirror.ts} (reflection {@code y' = W - y}).
@@ -57,9 +60,9 @@ public final class KnnConstants {
     public static final double kFieldWidthYMeters = 8.23;
 
     /**
-     * When true and DS alliance is Red, KNN distance uses pose {@code (x, W - y)} so symmetric red-side
-     * positions match blue-recorded {@code knn_map.json} rows. This is field reflection, not Limelight
-     * {@code botpose_wpired} (different origin).
+     * When true and DS alliance is Red, KNN lookup uses pose {@code (L - x, W - y)} so a map tuned from the
+     * blue half matches symmetric red-side positions (same idea as hub X/Y in {@link frc.robot.DriveConstants}).
+     * Set false if {@code knn_map.json} uses absolute WPIBlue coordinates covering both halves of the field.
      */
-    public static final boolean kMirrorPoseYForRedAllianceKnnLookup = true;
+    public static final boolean kMirrorPoseAcrossFieldForRedAllianceKnnLookup = true;
 }

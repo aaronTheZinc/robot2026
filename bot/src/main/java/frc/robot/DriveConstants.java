@@ -115,9 +115,11 @@ public final class DriveConstants {
      * {@link #kTeleopHubAlignToleranceDeg}. Uses {@link #kTeleopRotationStickSign} so hub assist matches
      * teleop rotation direction, and {@link #kTeleopHubAlignOmegaSign} if chassis omega is inverted vs error.
      *
-     * @param hubHeadingOffsetDeg additive field heading (deg) on top of the true hub bearing
+     * @param hubHeadingOffsetDeg additive field heading (deg) on top of the shot-map hub bearing (e.g. driver
+     *     calibration)
      */
     public static double teleopOmegaTowardHub(Pose2d robotPose, double hubHeadingOffsetDeg) {
+        // Matches dashboard {@code Pose/idealShooterPose} third element and {@code hubShotMapHeadingTowardHubDeg}.
         Rotation2d target = rotationToFaceHubForShooting(robotPose, hubHeadingOffsetDeg);
         double errorRad =
                 MathUtil.angleModulus(target.getRadians() - robotPose.getRotation().getRadians());
@@ -177,6 +179,14 @@ public final class DriveConstants {
     public static final double kHubFacingBearingOffsetDegrees = 0.0;
 
     /**
+     * Legacy shot-map LSQ coefficients (dashboard / log fit). On-robot hub align does not apply this offset —
+     * {@link #rotationToFaceHubFromShotMap} matches {@link #rotationToFaceHub} (geometric bearing).
+     */
+    public static final double kHubShotMapHeadingOffsetA = 0.0;
+    public static final double kHubShotMapHeadingOffsetPerMDx = 0.0;
+    public static final double kHubShotMapHeadingOffsetPerMDy = 0.0;
+
+    /**
      * Heading to hold so the scoring side faces the hub (field frame), from fused pose.
      * Bearing is toward hub plus {@link #kHubFacingBearingOffsetDegrees}.
      */
@@ -184,16 +194,24 @@ public final class DriveConstants {
         return rotationToFaceFieldPoint(robotPose, hubTargetXMeters(), hubTargetYMeters());
     }
 
-    /** Alias kept for callers; returns the true geometric bearing to the hub center. */
+    /**
+     * Same hub-facing heading as {@link #rotationToFaceHub} (no extra shot-map bearing offset).
+     */
     public static Rotation2d rotationToFaceHubFromShotMap(Pose2d robotPose) {
         return rotationToFaceHub(robotPose);
     }
 
     /**
-     * Full shooting aim heading: true hub-center bearing plus any caller-provided field-heading adjustment.
+     * Full shooting / hub-align aim: {@link #rotationToFaceHubFromShotMap} plus optional trim (deg), e.g. driver
+     * calibration from {@link frc.robot.HubAlignCalibration}.
      */
     public static Rotation2d rotationToFaceHubForShooting(Pose2d robotPose, double extraHeadingOffsetDeg) {
-        return rotationToFaceHub(robotPose).plus(Rotation2d.fromDegrees(extraHeadingOffsetDeg));
+        return rotationToFaceHubFromShotMap(robotPose).plus(Rotation2d.fromDegrees(extraHeadingOffsetDeg));
+    }
+
+    /** Unused on-robot (always 0); kept for API parity with dashboard helpers. */
+    public static double hubShotMapHeadingOffsetRad(double hubMinusRobotDxM, double hubMinusRobotDyM) {
+        return 0.0;
     }
 
     /**

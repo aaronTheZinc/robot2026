@@ -57,6 +57,51 @@ export function rayNdcToFieldXY(
   return worldXZToFieldXY(wx, wz, fieldLengthM, fieldWidthM);
 }
 
+/**
+ * Same as {@link rayNdcToFieldXY}, but transforms the floor hit through {@code fieldRoot} with
+ * {@link THREE.Object3D#worldToLocal} first so picks match robot pose when the field group is yawed
+ * (e.g. red driver perspective).
+ */
+export function worldPointToFieldXY(
+  worldPoint: THREE.Vector3,
+  fieldLengthM: number,
+  fieldWidthM: number,
+  fieldRoot: THREE.Object3D | null
+): { x: number; y: number } {
+  const p = worldPoint.clone();
+  if (fieldRoot) {
+    fieldRoot.worldToLocal(p);
+  }
+  return worldXZToFieldXY(p.x, p.z, fieldLengthM, fieldWidthM);
+}
+
+export function rayNdcToFieldXYWithFieldRoot(
+  ndcX: number,
+  ndcY: number,
+  camera: THREE.PerspectiveCamera,
+  fieldLengthM: number,
+  fieldWidthM: number,
+  fieldRoot: THREE.Object3D | null
+): { x: number; y: number } | null {
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+  const origin = raycaster.ray.origin;
+  const dir = raycaster.ray.direction;
+  if (Math.abs(dir.y) < 1e-8) {
+    return null;
+  }
+  const t = -origin.y / dir.y;
+  if (t < 0) {
+    return null;
+  }
+  const hit = new THREE.Vector3(
+    origin.x + t * dir.x,
+    origin.y + t * dir.y,
+    origin.z + t * dir.z
+  );
+  return worldPointToFieldXY(hit, fieldLengthM, fieldWidthM, fieldRoot);
+}
+
 /** rotation.y (rad): WPILib heading (CCW from +X) matches Three.js Y-up yaw on the XZ floor. */
 export function fieldHeadingDegToSceneYawRad(headingDeg: number): number {
   return THREE.MathUtils.degToRad(headingDeg);

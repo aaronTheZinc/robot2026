@@ -7,13 +7,13 @@
         {
           "type": "path",
           "data": {
-            "pathName": "straight-back"
+            "pathName": "trench-right"
           }
         },
         {
           "type": "named",
           "data": {
-            "name": "Straight Back Wing Shot"
+            "name": "Point and Shoot Depo"
           }
         }
       ]

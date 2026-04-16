@@ -23,6 +23,7 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Commands;
+import edu.wpi.first.wpilibj2.command.ConditionalCommand;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
@@ -54,6 +55,8 @@ public class RobotContainer {
     private static final double kNamedBackTranslationSeconds = 2.0;
     private static final double kShotRampSeconds = 1.0;
     private static final double kAutoShotFeedSeconds = 2;
+    /** Feed / hopper window for {@code straight-back.auto} (longer than default autos). */
+    private static final double kStraightBackAutoShotFeedSeconds = 3.5;
     /** Driver Xbox rumble (0–1) while Limelight reports a tag lock ({@code tv}). */
     private static final double kDriverTagLockRumble = 0.4;
     /** Same as Phoenix SwerveWithPathPlanner example: full kSpeedAt12Volts top speed. */
@@ -96,6 +99,12 @@ public class RobotContainer {
     private final ShooterCommands shooterCommands = new ShooterCommands(shooter);
     private final IntakeCommands intakeCommands = new IntakeCommands(intake);
 
+    /**
+     * Once true, {@link #getIntakeDownPulseOncePerSessionCommand()} never runs the homing pulse again for this JVM
+     * session (first auto or teleop enable wins). Never reset.
+     */
+    private boolean intakeDownHomingPulseConsumed;
+
     /* Path follower */
     private final SendableChooser<Command> autoChooser;
 
@@ -103,6 +112,9 @@ public class RobotContainer {
         NamedCommands.registerCommand("Center Shoot", getHubAlignThenKnnInferredAutoShotCommand(false));
         NamedCommands.registerCommand("Base Shoot", getHubAlignThenKnnInferredAutoShotCommand(false));
         NamedCommands.registerCommand("Wing Shot", getHubAlignThenKnnInferredAutoShotCommand(true));
+        NamedCommands.registerCommand(
+                "Straight Back Wing Shot",
+                getHubAlignThenKnnInferredAutoShotCommand(true, kStraightBackAutoShotFeedSeconds));
         NamedCommands.registerCommand(
             "Intake Sequence",
             Commands.deadline(
@@ -129,10 +141,12 @@ public class RobotContainer {
         NamedCommands.registerCommand("Pivot Home Down", intakeCommands.getPivotDownHomingCommand());
         NamedCommands.registerCommand("Pivot To Stow", intakeCommands.getPivotToStowCommand());
         NamedCommands.registerCommand("Pivot To Collect", intakeCommands.getPivotToCollectCommand());
+        NamedCommands.registerCommand("Intake Down", intakeCommands.getPivotTowardCollectPulseCommand());
 
         AutoDiagnostics.publishRegisteredNamedCommands(
-                "Center Shoot, Base Shoot, Wing Shot, Intake Sequence, Intake 6s, Back Translation, Point and Shoot, "
-                        + "Point and Shoot Depo, Heading 0, roller-in, Pivot Home Stow, Pivot Home Down, Pivot To Stow, Pivot To Collect");
+                "Center Shoot, Base Shoot, Wing Shot, Straight Back Wing Shot, Intake Sequence, Intake 6s, Back Translation, Point and Shoot, "
+                        + "Point and Shoot Depo, Heading 0, roller-in, Pivot Home Stow, Pivot Home Down, Pivot To Stow, "
+                        + "Pivot To Collect, Intake Down");
 
         autoChooser = AutoBuilder.buildAutoChooser("Tests");
         autoChooser.addOption("Basic Shoot Auto", getBasicShootAutoCommand());
@@ -169,9 +183,14 @@ public class RobotContainer {
      * and {@code Point and Shoot Depo}.
      */
     private Command getHubAlignThenKnnInferredAutoShotCommand(boolean wingFallbackWhenNoMap) {
+        return getHubAlignThenKnnInferredAutoShotCommand(wingFallbackWhenNoMap, kAutoShotFeedSeconds);
+    }
+
+    private Command getHubAlignThenKnnInferredAutoShotCommand(
+            boolean wingFallbackWhenNoMap, double feedSeconds) {
         return Commands.sequence(
                 hubAlignCommands.getRotateToHubInPlaceCommand(),
-                getKnnInferredAutoShotSequenceCommand(wingFallbackWhenNoMap));
+                getKnnInferredAutoShotSequenceCommand(wingFallbackWhenNoMap, feedSeconds));
     }
 
     /** PathPlanner named command: hub align + same shot as {@link #getHubAlignThenKnnInferredAutoShotCommand(boolean)}. */
@@ -224,7 +243,7 @@ public class RobotContainer {
      * PathPlanner timed shot using IDW hood/RPM from pose when {@code knn_map.json} has points; otherwise
      * fixed wing or center profile ({@code wingFallback}).
      */
-    private Command getKnnInferredAutoShotSequenceCommand(boolean wingFallbackWhenNoMap) {
+    private Command getKnnInferredAutoShotSequenceCommand(boolean wingFallbackWhenNoMap, double feedSeconds) {
         return Commands.defer(
                 () -> {
                     Pose2d here = drivetrain.getState().Pose;
@@ -235,9 +254,9 @@ public class RobotContainer {
                                         + (wingFallbackWhenNoMap ? "wing" : "center")
                                         + " shot",
                                 false);
-                        return getAutoShotSequenceCommand(wingFallbackWhenNoMap);
+                        return getAutoShotSequenceCommand(wingFallbackWhenNoMap, feedSeconds);
                     }
-                    return getKnnMapAutoShotLiveSequenceCommand();
+                    return getKnnMapAutoShotLiveSequenceCommand(feedSeconds);
                 },
                 Set.of(shooter, intake));
     }
@@ -246,7 +265,7 @@ public class RobotContainer {
      * Auto shot ramp + feed with hood/RPM updated every cycle from IDW (smoothed hood). Same timing as
      * fixed-profile autos; {@link ShooterCommands#getRunShotProfileCommand} cleanup runs on shot end.
      */
-    private Command getKnnMapAutoShotLiveSequenceCommand() {
+    private Command getKnnMapAutoShotLiveSequenceCommand(double feedSeconds) {
         Command rampShot = Commands.run(this::applyLiveKnnShootingSetpoints, shooter);
         Command feedShot = Commands.run(this::applyLiveKnnShootingSetpoints, shooter);
         return Commands.sequence(
@@ -267,9 +286,10 @@ public class RobotContainer {
                                                         }),
                                                 rampShot))),
                         Commands.deadline(
-                                Commands.waitSeconds(kAutoShotFeedSeconds),
+                                Commands.waitSeconds(feedSeconds),
                                 Commands.parallel(
-                                        feedShot, intakeCommands.getFeedToShooterCommand())))
+                                        feedShot,
+                                        intakeCommands.getFeedToShooterWithRollerCommand())))
                 .finallyDo(
                         () -> {
                             intake.stopHopper();
@@ -277,7 +297,7 @@ public class RobotContainer {
                         });
     }
 
-    private Command getAutoShotSequenceCommand(boolean wingShot) {
+    private Command getAutoShotSequenceCommand(boolean wingShot, double feedSeconds) {
         Command rampShot =
                 wingShot
                         ? shooterCommands.getRunWingShotHoldCommand()
@@ -293,10 +313,10 @@ public class RobotContainer {
                                 Commands.parallel(
                                         intakeCommands.getStopHopperCommand(), rampShot)),
                         Commands.deadline(
-                                Commands.waitSeconds(kAutoShotFeedSeconds),
+                                Commands.waitSeconds(feedSeconds),
                                 Commands.parallel(
                                         feedShot,
-                                        intakeCommands.getFeedToShooterCommand())))
+                                        intakeCommands.getFeedToShooterWithRollerCommand())))
                 .finallyDo(
                         () -> {
                             intake.stopHopper();
@@ -322,7 +342,7 @@ public class RobotContainer {
                                         rampShot)),
                         Commands.parallel(
                                 feedShot,
-                                intakeCommands.getFeedToShooterCommand()))
+                                intakeCommands.getFeedToShooterWithRollerCommand()))
                 .finallyDo(
                         () -> {
                             intake.stopHopper();
@@ -372,7 +392,7 @@ public class RobotContainer {
                                                                     shooter)))),
                                     Commands.parallel(
                                             Commands.run(this::applyLiveKnnShootingSetpoints, shooter),
-                                            intakeCommands.getFeedToShooterCommand()))
+                                            intakeCommands.getFeedToShooterWithRollerCommand()))
                             .finallyDo(
                                     () -> {
                                         intake.stopHopper();
@@ -381,6 +401,48 @@ public class RobotContainer {
                             .withName("KNN held shot (inferred)");
                 },
                 Set.of(shooter, intake));
+    }
+
+    /**
+     * Like {@link #getKnnHeldShotFromInferredCommand()} but rotates toward the hub in place during the ramp window,
+     * then feeds (same as inferred held shot).
+     */
+    private Command getKnnHeldShotAlignHubDuringRampCommand() {
+        return Commands.defer(
+                () -> {
+                    if (knnInterpreter.getMapSize() == 0) {
+                        DriverStation.reportWarning("KNN: knn_map.json missing or has no points", false);
+                        return Commands.none();
+                    }
+                    Command rampKnn =
+                            Commands.sequence(
+                                    Commands.runOnce(
+                                            () -> {
+                                                knnInterpreter.update(drivetrain.getState().Pose);
+                                                knnInterpreter.snapSmoothedHoodToInterpolated();
+                                                knnInterpreter.snapSmoothedRpmToInterpolated();
+                                            }),
+                                    Commands.run(this::applyLiveKnnShootingSetpoints, shooter));
+                    return Commands.sequence(
+                                    Commands.runOnce(
+                                            () -> shooter.setShootFlywheelVelocityEnabled(true), shooter),
+                                    Commands.deadline(
+                                            Commands.waitSeconds(kShotRampSeconds),
+                                            Commands.parallel(
+                                                    intakeCommands.getStopHopperCommand(),
+                                                    hubAlignCommands.getRotateToHubInPlaceCommand(),
+                                                    rampKnn)),
+                                    Commands.parallel(
+                                            Commands.run(this::applyLiveKnnShootingSetpoints, shooter),
+                                            intakeCommands.getFeedToShooterWithRollerCommand()))
+                            .finallyDo(
+                                    () -> {
+                                        intake.stopHopper();
+                                        endShotResumeKnnTracking();
+                                    })
+                                    .withName("KNN held shot (align hub during ramp)");
+                },
+                Set.of(shooter, intake, drivetrain));
     }
 
     /**
@@ -436,13 +498,13 @@ public class RobotContainer {
                                     Commands.parallel(
                                             getTeleopHubAlignDriveCommand(),
                                             feedKnn,
-                                            intakeCommands.getFeedToShooterCommand()))
+                                            intakeCommands.getFeedToShooterWithRollerCommand()))
                             .finallyDo(
                                     () -> {
                                         intake.stopHopper();
                                         endShotResumeKnnTracking();
                                     })
-                            .withName("KNN held shot (hub align)");
+                                    .withName("KNN held shot (hub align)");
                 },
                 Set.of(shooter, intake, drivetrain));
     }
@@ -532,7 +594,12 @@ public class RobotContainer {
                 .and(new Trigger(DriverStation::isTeleopEnabled))
                 .whileTrue(getTeleopHubAlignDriveCommand().withName("Hub align (hold)"));
 
-        // R3 (driver): snap hood smoothing and apply smoothed IDW hood + RPM once.
+        // R3 (driver) hold: same hub-facing assist as right bumper. (onTrue below = one-shot KNN snap on press.)
+        joystick.rightStick()
+                .and(new Trigger(DriverStation::isTeleopEnabled))
+                .whileTrue(getTeleopHubAlignDriveCommand().withName("Hub align (R3 hold)"));
+
+        // R3 (driver) press: snap hood smoothing and apply smoothed IDW hood + RPM once.
         joystick.rightStick()
                 .and(new Trigger(DriverStation::isTeleopEnabled))
                 .onTrue(
@@ -560,23 +627,31 @@ public class RobotContainer {
         // R3 (right stick): manual hopper feed while held
         subsystems.rightStick().whileTrue(intakeCommands.getFeedToShooterCommand());
 
-        // A (hold): ramp shooter then hopper — IDW inferred hood/RPM from current pose; runs until release.
-        subsystems.a()
-                .and(new Trigger(DriverStation::isTeleopEnabled))
-                .whileTrue(getKnnHeldShotFromInferredCommand());
+        var teleopEnabled = new Trigger(DriverStation::isTeleopEnabled);
+        // A (hold): face hub while KNN ramp, then feed. L3: KNN inferred only (no in-place hub rotate).
+        subsystems.a().and(teleopEnabled).whileTrue(getKnnHeldShotAlignHubDuringRampCommand());
+        subsystems.leftStick().and(teleopEnabled).whileTrue(getKnnHeldShotFromInferredCommand());
         // Back: center held shot (moved from A).
         subsystems.back().whileTrue(getCenterHeldShotSequenceCommand());
         subsystems.b().whileTrue(getWingHeldShotSequenceCommand());
 
-        // Intake pivot manual: L3 = stow (up) while held.
-        // X = rotate in place to hub (same as auto Point and Shoot), then KNN shot with stick hub assist (driver RBP law).
-        // Y = wing held shot (POV-tuned). Start+Y = homing to mechanical stow stop.
-        subsystems.leftStick().whileTrue(intakeCommands.getPivotTowardStowManualCommand());
+        // Intake pivot: X/Y = manual open-loop toward collect / stow ({@link IntakeConstants#kPivotCollectSpeed} /
+        // {@link IntakeConstants#kPivotStowSpeed}). Encoder PID snap (pivotReady) is unused while homing is off.
+        // Previous: getPivotToCollectCommand / getPivotToStowCommand.
         subsystems.x()
-                .and(new Trigger(DriverStation::isTeleopEnabled))
+                .and(teleopEnabled)
+                .whileTrue(intakeCommands.getPivotTowardCollectManualCommand());
+        subsystems.y()
+                .and(teleopEnabled)
+                .whileTrue(intakeCommands.getPivotTowardStowManualCommand());
+        // R1 without Start: aim + KNN held shot. (Start+R1 reserved for pivot homing when enabled.)
+        subsystems.rightBumper()
+                .and(teleopEnabled)
+                .and(subsystems.start().negate())
                 .whileTrue(getPointToHubThenKnnHeldShotWithHubAlignCommand());
-        subsystems.start().and(subsystems.y()).onTrue(intakeCommands.getPivotHomingCommand());
-        subsystems.y().and(subsystems.start().negate()).whileTrue(getWingHeldShotSequenceCommand());
+        if (IntakeConstants.kEnableIntakePivotHomingAtEnable) {
+            subsystems.start().and(subsystems.rightBumper()).onTrue(intakeCommands.getPivotHomingCommand());
+        }
 
         // D-pad: hood angle (while held = repeat); latch keeps setpoint after release vs stow-at-min.
         subsystems.povUp().whileTrue(shooterCommands.getAdjustHoodUpWhileHeldCommand());
@@ -630,17 +705,24 @@ public class RobotContainer {
         hid.setRumble(GenericHID.RumbleType.kRightRumble, 0.0);
     }
 
-    /** SmartDashboard {@code Hub Align/*} — distance and heading error to the true hub center. */
+    /** SmartDashboard {@code Hub Align/*} — distance and heading error vs shot-map hub aim (dashboard model). */
     public void publishHubAlignTelemetry() {
+        var pose = drivetrain.getState().Pose;
         SmartDashboard.putNumber(
                 "Hub Align/Distance to hub (m)",
-                HubAlignCalibration.distanceToHubMeters(drivetrain.getState().Pose));
+                HubAlignCalibration.distanceToHubMeters(pose));
         double errDeg =
                 Math.toDegrees(
                         edu.wpi.first.math.MathUtil.angleModulus(
-                                DriveConstants.rotationToFaceHub(drivetrain.getState().Pose).getRadians()
-                                        - drivetrain.getState().Pose.getRotation().getRadians()));
+                                DriveConstants.rotationToFaceHubFromShotMap(pose).getRadians()
+                                        - pose.getRotation().getRadians()));
         SmartDashboard.putNumber("Hub Align/Heading error (deg)", errDeg);
+        double geometricDeg =
+                Math.toDegrees(
+                        edu.wpi.first.math.MathUtil.angleModulus(
+                                DriveConstants.rotationToFaceHub(pose).getRadians()
+                                        - DriveConstants.rotationToFaceHubFromShotMap(pose).getRadians()));
+        SmartDashboard.putNumber("Hub Align/Shot map offset vs geometric (deg)", geometricDeg);
         SmartDashboard.putNumber("Hub Align/Offset applied (deg)", 0.0);
         SmartDashboard.putBoolean("Hub Align/Calibrated", false);
     }
@@ -686,6 +768,38 @@ public class RobotContainer {
     /** Hood homing for real robot; schedule when enabling (auto or teleop). */
     public Command getHoodHomingCommand() {
         return shooterCommands.getHoodHomingCommand();
+    }
+
+    /**
+     * Hood stall homing with {@link IntakeCommands#getPivotTowardCollectPulseCommand()} in parallel; the pulse uses
+     * {@link #getIntakeDownPulseOncePerSessionCommand()} so it runs at most once for the whole run (auto or teleop,
+     * whichever schedules homing first). When {@link IntakeConstants#kEnableIntakePivotHomingAtEnable} is true, full
+     * pivot homing runs after hood finishes.
+     */
+    public Command getEnableHomingSequenceCommand() {
+        Command hoodHoming = shooterCommands.getHoodHomingCommand();
+        Command intakeDownOnce = getIntakeDownPulseOncePerSessionCommand();
+        Command hoodWithIntake =
+                Commands.parallel(hoodHoming, intakeDownOnce).withName("HoodHomingWithIntakeDown");
+        if (IntakeConstants.kEnableIntakePivotHomingAtEnable) {
+            return hoodWithIntake.andThen(getPivotHomingCommand()).withName("HoodThenPivotHoming");
+        }
+        return hoodWithIntake;
+    }
+
+    /**
+     * One-shot for the robot session: same pivot pulse as PathPlanner {@code Intake Down}, but after the first run
+     * this becomes a no-op until code redeploy / power cycle. Path markers should use {@code Intake Down} for
+     * repeatable pulses.
+     */
+    public Command getIntakeDownPulseOncePerSessionCommand() {
+        return new ConditionalCommand(
+                        Commands.sequence(
+                                Commands.runOnce(() -> intakeDownHomingPulseConsumed = true),
+                                intakeCommands.getPivotTowardCollectPulseCommand()),
+                        Commands.none(),
+                        () -> !intakeDownHomingPulseConsumed)
+                .withName("IntakeDownOncePerSession");
     }
 
     /** Intake pivot homing for real robot; schedule when enabling (auto or teleop). */

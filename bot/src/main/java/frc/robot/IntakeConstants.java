@@ -8,10 +8,26 @@ package frc.robot;
 public final class IntakeConstants {
     private IntakeConstants() {}
 
+    /**
+     * When false, robot enable does not run intake pivot homing and the subsystem Start+R1 homing binding is off;
+     * use X/Y manual open-loop until homing is re-enabled.
+     */
+    public static final boolean kEnableIntakePivotHomingAtEnable = false;
+
     /** CAN ID for the pivot Spark MAX (up/down). */
     public static final int kPivotId = 33;
     /** SPARK MAX smart current limit (A) for the pivot. Tune with mechanism load / breaker budget. */
     public static final int kPivotSmartCurrentLimitAmps = 20;
+    /**
+     * After the first successful collect-direction mechanical homing this enable, later collect homing runs use
+     * this higher limit so the gearbox can develop enough torque at the down stop.
+     */
+    public static final int kPivotCollectHomingSmartCurrentLimitAmpsAfterFirst = 40;
+    /**
+     * While X/Y PID snap runs (after {@link #kPivotPidToleranceRotations} setpoints are valid), pivot uses this
+     * high limit so the controller is not starved by the default smart limit.
+     */
+    public static final int kPivotPidSnapSmartCurrentLimitAmps = 80;
     /** CAN ID for the roller Spark MAX (in/out). */
     public static final int kRollerId = 31;
     /** CAN IDs for the two hopper Spark MAXs (run together for feed / spit). */
@@ -42,6 +58,8 @@ public final class IntakeConstants {
     public static final double kPivotKd = 0.02;
     /** Max normalized output used by software PID for pivot position hold. */
     public static final double kPivotPidMaxOutput = 0.5;
+    /** Max normalized output for X/Y encoder snap after homing (full range; current limit handles thermal). */
+    public static final double kPivotPidSnapMaxOutput = 1.0;
     /** Error tolerance (motor rotations) for considering pivot at setpoint in PID mode. */
     public static final double kPivotPidToleranceRotations = 0.02;
 
@@ -56,27 +74,65 @@ public final class IntakeConstants {
     public static final double kHopperSpitOutSpeed = 0.8;
 
     // ----- Pivot stop-based control (mechanical stops, no encoder setpoints) -----
-    /** Normalized speed [-1, 1] for homing toward stow (init / Y+B); keep slow for safety. */
-    public static final double kPivotHomingSpeed = 0.6;
-    /** Normalized speed [-1, 1] for homing toward collect (down) until stall; keep slow for safety. */
-    public static final double kPivotCollectHomingSpeed = 0.2;
+    /**
+     * Homing toward stow uses this fraction of {@link #kPivotStowSpeed} so direction always matches teleop stow
+     * (stall/limit finds the up stop); keep below 1.0 for a gentler approach.
+     */
+    public static final double kPivotHomingStowDutyFraction = 0.45;
+    /**
+     * Homing toward collect uses this fraction of {@link #kPivotCollectSpeed} (same direction as teleop collect);
+     * range-of-motion is learned when current spikes at the down stop.
+     */
+    public static final double kPivotHomingCollectDutyFraction = 1.0;
     /** Normalized speed [-1, 1] for pivot moving toward stow (up). */
     public static final double kPivotStowSpeed = -0.6;
     /** Normalized speed [-1, 1] for pivot moving toward collect (down). */
-    public static final double kPivotCollectSpeed = 0.2;
-    /** Output current (A) above which pivot is considered at mechanical stop. */
-    public static final double kPivotStallCurrentAmps = 25.0;
-    /** Consecutive cycles current must be above threshold to confirm stall. */
+    public static final double kPivotCollectSpeed = 0.5;
+    /** Output current (A) above which pivot is considered at mechanical stop (stow homing). */
+    public static final double kPivotStallCurrentAmps = 5.0;
+    /** Consecutive cycles current must be above threshold to confirm stall (stow homing). */
     public static final int kPivotStallConfirmCycles = 5;
-    /** Max time (s) for stow or collect command; safety timeout if stall never triggers. */
+    /**
+     * Collect-direction homing stall threshold (A). Lower = finish mechanical down sooner with less draw.
+     */
+    public static final double kPivotCollectHomingStallCurrentAmps = 8.0;
+    /** Consecutive cycles above threshold to confirm down stop — lower = shorter time window. */
+    public static final int kPivotCollectHomingStallConfirmCycles = 10;
+    /** Cycles before collect homing stall detection starts (ignore inrush). Lower = shorter pre-window. */
+    public static final int kPivotCollectHomingIgnoreStallCycles = 8;
+    /**
+     * Collect setpoint seek: if still short of encoder target but output current stays here (A), treat as wedged
+     * at the stop and finish (avoids grinding).
+     */
+    public static final double kPivotCollectSeekStallStopAmps = 6.0;
+    /** Consecutive high-current cycles to finish collect seek when mechanically blocked. */
+    public static final int kPivotCollectSeekStallConfirmCycles = 4;
+    /** Max time (s) for stow mechanical homing; safety timeout if stall never triggers. */
     public static final double kPivotStallTimeoutSeconds = 5.0;
+    /** Max time (s) for collect mechanical homing — allow long travel before the stop loads. */
+    public static final double kPivotCollectHomingStallTimeoutSeconds = 10.0;
+    /** Max time (s) for X/Y setpoint seek after homing (encoder-only travel). */
+    public static final double kPivotSetpointSeekTimeoutSeconds = 10.0;
+    /** Open-loop pivot toward collect (down) for this long, then stop (e.g. short deploy pulse). */
+    public static final double kPivotTowardCollectPulseSeconds = 0.3;
 
     /**
-     * Pivot relative position (motor rotations) that counts as "down" for dashboard / logic.
+     * DIO channel for pivot fully up (stow) limit; {@code < 0} = not wired (stall + encoder only).
      */
-    public static final double kPivotDownPositionRotations = 42.0;
-    /** Within ±this many rotations of {@link #kPivotDownPositionRotations}, intake is considered at down. */
+    public static final int kPivotUpLimitDioChannel = -1;
+    /**
+     * DIO channel for pivot fully down (collect) limit; {@code < 0} = not wired (stall + encoder only).
+     */
+    public static final int kPivotDownLimitDioChannel = -1;
+
+    /**
+     * Default pivot "down" position (motor rotations) before homing learns the real value from the stop.
+     */
+    public static final double kPivotDownPositionRotationsDefault = 42.0;
+    /** Within ±this many rotations of the learned down position, intake is considered at down. */
     public static final double kPivotDownPositionToleranceRotations = 5.0;
+    /** Within this many rotations of 0, intake is considered at stow after homing. */
+    public static final double kPivotStowPositionToleranceRotations = 0.08;
 
     /** How often {@link frc.robot.subsystems.IntakeSubsystem} pushes intake fields to SmartDashboard (s). */
     public static final double kIntakeDashboardPublishPeriodSeconds = 1.0;

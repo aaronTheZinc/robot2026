@@ -27,6 +27,14 @@ export type RobotState = {
     deployed: boolean;
     hasPiece: boolean;
     rollerRpm: number;
+    /** Relative pivot encoder (rot) from Spark — live. */
+    pivotPositionRot: number;
+    /** Stow setpoint (rot), 0 after homing zeros at the stow stop. */
+    pivotStowSetpointRot: number;
+    /** Collect setpoint (rot) from homing stall at the down stop. */
+    pivotCollectSetpointRot: number;
+    /** True after full pivot homing succeeded this enable. */
+    pivotReady: boolean;
   };
   shooter: {
     enabled: boolean;
@@ -75,9 +83,9 @@ export type RobotState = {
   targets: { x: number; y: number }[];
   /** Robot KNN selected point index from NT /KNN/selectedIndex, or -1 if not set */
   knnSelectedIndex: number;
-  /** Geometric nearest map index for raw WPIBlue pose — /KNN/nearestIndexBlue */
+  /** Geometric nearest map index for fused WPIBlue pose — /KNN/nearestIndexBlue */
   knnNearestIndexBlue: number;
-  /** Geometric nearest map index for Y-mirrored pose — /KNN/nearestIndexRed */
+  /** Same as blue when robot uses blue-only KNN lookup — /KNN/nearestIndexRed (legacy) */
   knnNearestIndexRed: number;
   /** From WPILib {@code FMSInfo} over NT when connected (driver station / FMS). */
   driverStation: {
@@ -185,6 +193,10 @@ export function createInitialRobotState(mode: RobotMode): RobotState {
       deployed: false,
       hasPiece: false,
       rollerRpm: 0,
+      pivotPositionRot: 0,
+      pivotStowSetpointRot: 0,
+      pivotCollectSetpointRot: 0,
+      pivotReady: false,
     },
     shooter: {
       enabled: false,
@@ -406,6 +418,14 @@ export function nextMockState(prev: RobotState, nowMs = Date.now()): RobotState 
       ...prev.intake,
       hasPiece,
       rollerRpm: intakeRpm,
+      pivotStowSetpointRot: 0,
+      pivotCollectSetpointRot: 3.0,
+      pivotReady: true,
+      pivotPositionRot: approachValue(
+        prev.intake.pivotPositionRot,
+        prev.intake.deployed ? 3.0 : 0,
+        1.2 * deltaSec
+      ),
     },
     shooter: {
       ...prev.shooter,

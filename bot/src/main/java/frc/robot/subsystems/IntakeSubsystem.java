@@ -12,6 +12,12 @@ import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.config.SparkBaseConfig;
 import com.revrobotics.spark.config.SparkMaxConfig;
 
+import edu.wpi.first.networktables.NetworkTable;
+import edu.wpi.first.networktables.NetworkTableInstance;
+
+import edu.wpi.first.math.MathUtil;
+import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.wpilibj.DigitalInput;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
@@ -36,8 +42,29 @@ public class IntakeSubsystem extends SubsystemBase {
 
     private final RelativeEncoder pivotEncoder = pivotMotor.getEncoder();
 
+    /** Optional limits; {@code null} when channel &lt; 0. */
+    private final DigitalInput pivotUpLimit;
+
+    private final DigitalInput pivotDownLimit;
+
+    /** Encoder rotations at collect (down) stop; updated by full homing or down-only homing. */
+    private double pivotDownRotationsLearned = IntakeConstants.kPivotDownPositionRotationsDefault;
+
     /** True after pivot has homed to stow stop this enable (mirrors hood shooterReady). */
     private boolean pivotReady;
+
+    /**
+     * Cleared on disable; after first successful collect-direction mechanical homing, later collect homings use
+     * {@link IntakeConstants#kPivotCollectHomingSmartCurrentLimitAmpsAfterFirst}.
+     */
+    private boolean collectMechanicalHomingSucceededOnce;
+
+    /** Software PID for encoder snap to stow/collect after homing (X/Y). */
+    private final PIDController pivotPositionPid =
+            new PIDController(
+                    IntakeConstants.kPivotKp,
+                    IntakeConstants.kPivotKi,
+                    IntakeConstants.kPivotKd);
 
     /** After stall-based travel: true = at stow (up), false = at collect (down), null = unknown. */
     private Boolean pivotStowed = null;
@@ -45,11 +72,20 @@ public class IntakeSubsystem extends SubsystemBase {
     /** Last FPGA time we published to SmartDashboard; negative so the first loop always publishes. */
     private double lastDashboardPublishSec = -1.0;
 
+    /** Web dashboard NT table {@code Intake} — same pattern as {@code /Shooter/*} debug topics. */
+    private final NetworkTable intakeNetworkTable = NetworkTableInstance.getDefault().getTable("Intake");
+
     public IntakeSubsystem() {
-        var pivotConfig = new SparkMaxConfig()
-                .smartCurrentLimit(IntakeConstants.kPivotSmartCurrentLimitAmps)
-                .idleMode(SparkBaseConfig.IdleMode.kCoast);
-        pivotMotor.configure(pivotConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+        pivotUpLimit = makeLimitSwitch(IntakeConstants.kPivotUpLimitDioChannel);
+        pivotDownLimit = makeLimitSwitch(IntakeConstants.kPivotDownLimitDioChannel);
+
+        pivotPositionPid.setTolerance(IntakeConstants.kPivotPidToleranceRotations);
+        var pivotConfigInitial =
+                new SparkMaxConfig()
+                        .smartCurrentLimit(IntakeConstants.kPivotSmartCurrentLimitAmps)
+                        .idleMode(SparkBaseConfig.IdleMode.kCoast);
+        pivotMotor.configure(
+                pivotConfigInitial, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
 
         var rollerConfig = new SparkMaxConfig()
                 .idleMode(SparkBaseConfig.IdleMode.kBrake);
@@ -72,6 +108,8 @@ public class IntakeSubsystem extends SubsystemBase {
 
     @Override
     public void periodic() {
+        publishPivotDashboardNetworkTables();
+
         double now = Timer.getFPGATimestamp();
         if (now - lastDashboardPublishSec < IntakeConstants.kIntakeDashboardPublishPeriodSeconds) {
             return;
@@ -80,7 +118,9 @@ public class IntakeSubsystem extends SubsystemBase {
 
         double pivotRelRot = getPivotRotations();
         SmartDashboard.putNumber("Intake/Pivot Relative Position (rot)", pivotRelRot);
-        SmartDashboard.putNumber("Intake/Pivot Down Threshold (rot)", IntakeConstants.kPivotDownPositionRotations);
+        SmartDashboard.putNumber("Intake/Pivot Stow Setpoint (rot)", 0.0);
+        SmartDashboard.putNumber("Intake/Pivot Collect Setpoint (rot)", pivotDownRotationsLearned);
+        SmartDashboard.putNumber("Intake/Pivot Down Learned (rot)", pivotDownRotationsLearned);
         SmartDashboard.putNumber(
                 "Intake/Pivot Down Tolerance (rot)", IntakeConstants.kPivotDownPositionToleranceRotations);
         SmartDashboard.putBoolean("Intake/Pivot At Down", isPivotAtDownPosition());
@@ -93,7 +133,18 @@ public class IntakeSubsystem extends SubsystemBase {
         SmartDashboard.putNumber("Intake/HopperBCurrentAmps", hopperMotorB.getOutputCurrent());
     }
 
-    // ----- Pivot (up/down) — mechanical stops, no encoder setpoints -----
+    /**
+     * Publishes pivot encoder + homing setpoints every loop for the web dashboard ({@code /Intake/*}).
+     * Stow setpoint is always 0 after mechanical homing; collect setpoint is {@link #pivotDownRotationsLearned}.
+     */
+    private void publishPivotDashboardNetworkTables() {
+        intakeNetworkTable.getEntry("pivotPositionRot").setDouble(getPivotRotations());
+        intakeNetworkTable.getEntry("pivotStowSetpointRot").setDouble(0.0);
+        intakeNetworkTable.getEntry("pivotCollectSetpointRot").setDouble(pivotDownRotationsLearned);
+        intakeNetworkTable.getEntry("pivotReady").setBoolean(pivotReady);
+    }
+
+    // ----- Pivot (up/down) — stall homing learns range; teleop seeks encoder setpoints -----
 
     /** Whether the pivot has been homed this enable (stow stop found and encoder zeroed). */
     public boolean isPivotReady() {
@@ -105,7 +156,98 @@ public class IntakeSubsystem extends SubsystemBase {
         pivotReady = ready;
         if (!ready) {
             stopPivot();
+            pivotDownRotationsLearned = IntakeConstants.kPivotDownPositionRotationsDefault;
+            collectMechanicalHomingSucceededOnce = false;
+            pivotPositionPid.reset();
+            applyPivotDefaultCurrentLimit();
         }
+    }
+
+    private void configurePivotMotor(int smartCurrentLimitAmps) {
+        var pivotConfig =
+                new SparkMaxConfig()
+                        .smartCurrentLimit(smartCurrentLimitAmps)
+                        .idleMode(SparkBaseConfig.IdleMode.kCoast);
+        pivotMotor.configure(pivotConfig, ResetMode.kResetSafeParameters, PersistMode.kNoPersistParameters);
+    }
+
+    /** Normal travel / open-loop: default smart current limit. */
+    public void applyPivotDefaultCurrentLimit() {
+        configurePivotMotor(IntakeConstants.kPivotSmartCurrentLimitAmps);
+    }
+
+    /**
+     * Call at the start of collect-direction mechanical homing: first run uses default limit; after the first
+     * successful collect homing this enable, uses a higher limit.
+     */
+    public void applyPivotCurrentLimitForCollectHoming() {
+        int amps =
+                collectMechanicalHomingSucceededOnce
+                        ? IntakeConstants.kPivotCollectHomingSmartCurrentLimitAmpsAfterFirst
+                        : IntakeConstants.kPivotSmartCurrentLimitAmps;
+        configurePivotMotor(amps);
+    }
+
+    /** Mark successful collect-direction mechanical homing so the next collect homing can use more current. */
+    public void markCollectMechanicalHomingSucceeded() {
+        collectMechanicalHomingSucceededOnce = true;
+    }
+
+    /** High smart current limit for PID snap (X/Y) so output is not capped by the default limit. */
+    public void applyPivotPidSnapCurrentLimit() {
+        configurePivotMotor(IntakeConstants.kPivotPidSnapSmartCurrentLimitAmps);
+    }
+
+    public void resetPivotPositionPid() {
+        pivotPositionPid.reset();
+    }
+
+    /**
+     * Closed-loop pivot toward {@code setpointRotations} (motor rotations). Call each cycle while holding PID snap
+     * current limit.
+     */
+    public void runPivotPidToSetpoint(double setpointRotations) {
+        double output =
+                pivotPositionPid.calculate(getPivotRotations(), setpointRotations);
+        output =
+                MathUtil.clamp(
+                        output,
+                        -IntakeConstants.kPivotPidSnapMaxOutput,
+                        IntakeConstants.kPivotPidSnapMaxOutput);
+        pivotMotor.set(output);
+    }
+
+    /** True when within {@link IntakeConstants#kPivotPidToleranceRotations} of {@code setpointRotations}. */
+    public boolean isPivotPidAtSetpoint(double setpointRotations) {
+        return Math.abs(getPivotRotations() - setpointRotations)
+                <= IntakeConstants.kPivotPidToleranceRotations;
+    }
+
+    private static DigitalInput makeLimitSwitch(int channel) {
+        if (channel < 0) {
+            return null;
+        }
+        return new DigitalInput(channel);
+    }
+
+    /** True when the up (stow) limit is active, if wired. */
+    public boolean isPivotUpLimitPressed() {
+        return pivotUpLimit != null && pivotUpLimit.get();
+    }
+
+    /** True when the down (collect) limit is active, if wired. */
+    public boolean isPivotDownLimitPressed() {
+        return pivotDownLimit != null && pivotDownLimit.get();
+    }
+
+    /** Rotations recorded at the down stop after homing (used for collect position). */
+    public double getPivotDownRotationsLearned() {
+        return pivotDownRotationsLearned;
+    }
+
+    /** Call when the pivot reaches the mechanical down stop during homing. */
+    public void setPivotDownRotationsLearnedFromHoming() {
+        pivotDownRotationsLearned = getPivotRotations();
     }
 
     /** Zero the pivot encoder (call when at a mechanical stop after the matching homing command). */
@@ -113,14 +255,16 @@ public class IntakeSubsystem extends SubsystemBase {
         pivotEncoder.setPosition(0);
     }
 
-    /** Run pivot slowly toward stow for homing (init / Y+B). */
+    /** Run pivot slowly toward stow for homing — same sign as {@link #setPivotTowardStow()}. */
     public void setPivotTowardStowHoming() {
-        pivotMotor.set(IntakeConstants.kPivotHomingSpeed);
+        pivotMotor.set(
+                IntakeConstants.kPivotStowSpeed * IntakeConstants.kPivotHomingStowDutyFraction);
     }
 
-    /** Run pivot slowly toward collect (down) for homing until stall (encoder zero = deployed). */
+    /** Run pivot slowly toward collect for homing — same sign as {@link #setPivotTowardCollect()}. */
     public void setPivotTowardCollectHoming() {
-        pivotMotor.set(IntakeConstants.kPivotCollectHomingSpeed);
+        pivotMotor.set(
+                IntakeConstants.kPivotCollectSpeed * IntakeConstants.kPivotHomingCollectDutyFraction);
     }
 
     /** Run pivot toward stow (up) at normal travel speed. */
@@ -145,12 +289,55 @@ public class IntakeSubsystem extends SubsystemBase {
     }  
 
     /**
-     * True when relative pivot position is within ±{@link IntakeConstants#kPivotDownPositionToleranceRotations}
-     * of {@link IntakeConstants#kPivotDownPositionRotations}.
+     * True near the learned collect (down) position (from homing), or within tolerance of
+     * {@link IntakeConstants#kPivotDownPositionRotationsDefault} before homing has run.
      */
     public boolean isPivotAtDownPosition() {
-        return getPivotRotations() > IntakeConstants.kPivotDownPositionRotations;
-        
+        double r = getPivotRotations();
+        double tol = IntakeConstants.kPivotDownPositionToleranceRotations;
+        return Math.abs(r - pivotDownRotationsLearned) <= tol;
+    }
+
+    /** True near stow (encoder zero) after homing. */
+    public boolean isPivotAtStowPosition() {
+        return Math.abs(getPivotRotations()) <= IntakeConstants.kPivotStowPositionToleranceRotations;
+    }
+
+    /**
+     * Seek stow setpoint (0 rot): run toward stow while encoder is above band, toward collect if below (rare).
+     * Stops motor when {@link #isPivotAtStowPosition()}.
+     */
+    public void runPivotSeekStowSetpoint() {
+        double r = getPivotRotations();
+        double tol = IntakeConstants.kPivotStowPositionToleranceRotations;
+        if (Math.abs(r) <= tol) {
+            stopPivot();
+            return;
+        }
+        if (r > tol) {
+            setPivotTowardStow();
+        } else {
+            setPivotTowardCollect();
+        }
+    }
+
+    /**
+     * Seek collect setpoint ({@link #pivotDownRotationsLearned}): run toward collect or stow by encoder error.
+     * Stops motor when {@link #isPivotAtDownPosition()}.
+     */
+    public void runPivotSeekCollectSetpoint() {
+        double r = getPivotRotations();
+        double target = pivotDownRotationsLearned;
+        double tol = IntakeConstants.kPivotDownPositionToleranceRotations;
+        if (Math.abs(r - target) <= tol) {
+            stopPivot();
+            return;
+        }
+        if (r < target - tol) {
+            setPivotTowardCollect();
+        } else {
+            setPivotTowardStow();
+        }
     }
 
     // ----- Roller (in/out) -----
@@ -264,6 +451,15 @@ public class IntakeSubsystem extends SubsystemBase {
     /** Run hopper to feed shooter (e.g. when shooting). Call after intake has piece. */
     public void feedToShooter() {
         runHopper();
+    }
+
+    /**
+     * Shot feed: hopper pushes to shooter while roller pulls to index the next piece. Do not use for
+     * {@link #intake()} — that stops the hopper each cycle.
+     */
+    public void feedToShooterWithRollerIntake() {
+        runHopper();
+        runRollerIntake();
     }
 
     /** Spit out: roller and hopper run in reverse (left bumper). */

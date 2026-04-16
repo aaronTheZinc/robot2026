@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
   createTurretMesh,
@@ -34,7 +34,7 @@ import {
   fieldHeadingDegToSceneForwardXZ,
   fieldHeadingDegToSceneYawRad,
   fieldPoseToWorldXZ,
-  rayNdcToFieldXY,
+  rayNdcToFieldXYWithFieldRoot,
 } from '../lib/simFieldToThree';
 import {
   flipFieldHeadingDegRotational,
@@ -77,13 +77,13 @@ type SimulationViewProps = {
   velocityMps: number;
   /** Logged / deploy KNN shot samples (same indices as robot `knn_map.json` when lists match). */
   shotMapPoints: KnnPoint[];
-  /** Match robot KNN Y-mirror on red ({@code FMSInfo/IsRedAlliance}). */
+  /** Red alliance: flips KNN marker Y for display; inference uses WPIBlue pose only. */
   isRedAlliance: boolean;
   /** `/KNN/selectedIndex` from robot, or -1 when unknown */
   knnSelectedIndex: number;
-  /** `/KNN/nearestIndexBlue` — raw WPIBlue pose nearest map row */
+  /** `/KNN/nearestIndexBlue` — nearest map row to fused WPIBlue pose */
   knnNearestIndexBlue: number;
-  /** `/KNN/nearestIndexRed` — Y-mirrored pose nearest map row */
+  /** `/KNN/nearestIndexRed` — duplicate of blue when mirror lookup off (legacy NT) */
   knnNearestIndexRed: number;
   connected: boolean;
   swerveSpeedMps: number;
@@ -98,6 +98,8 @@ type SimulationViewProps = {
   onAimTargetKindChange: (kind: 'hub' | 'drop') => void;
   onAddDropTarget: (fieldX: number, fieldY: number) => void;
   onAddNamedOrigin: (fieldX: number, fieldY: number) => void;
+  /** Append a map row at field coordinates (WPIBlue); returns the new row index. */
+  onAddShotSample: (fieldX: number, fieldY: number) => number;
   onRemoveNamedOrigin: (id: string) => void;
   onRenameNamedOrigin: (id: string, name: string) => void;
   onUpdateDropTarget: (
@@ -107,6 +109,20 @@ type SimulationViewProps = {
   onRemoveDropTarget: (id: string) => void;
   onSelectDropForAim: (id: string) => void;
   mockMode: boolean;
+  /** When mock, matches dashboard swerve field-relative toggle (W/S = ±field X, A/D = ±field Y). */
+  fieldRelative: boolean;
+  /** Mock mode only: field-frame deltas (m) and heading change (deg) from WASD + J/L. */
+  onMockSimKeyboardDrive: (payload: {
+    dx: number;
+    dy: number;
+    dHeadingDeg: number;
+    speedMps: number;
+  }) => void;
+  /**
+   * Mock mode only: set field pose / heading (m, °). Used for click-drag on the robot and the
+   * mock pose panel.
+   */
+  onMockSimPatchSwerve: (patch: { x?: number; y?: number; headingDeg?: number }) => void;
   onApplyMockShotFromSim: (
     headingDeg: number,
     shooterRpmSetpoint: number,
@@ -118,6 +134,9 @@ type SimulationViewProps = {
 
 const ROBOT_HEIGHT_M = 0.18;
 const VECTOR_OFFSET = 2.2;
+/** Mock sim: keyboard translation / rotation rates (WPILib field X/Y). */
+const MOCK_SIM_DRIVE_MPS = 3.0;
+const MOCK_SIM_ROT_DEG_PER_SEC = 80;
 
 function isPlaceholderKnnPoint(p: KnnPoint): boolean {
   return (
@@ -405,42 +424,37 @@ export default function SimulationView({
   onAimTargetKindChange,
   onAddDropTarget,
   onAddNamedOrigin,
+  onAddShotSample,
   onRemoveNamedOrigin,
   onRenameNamedOrigin,
   onUpdateDropTarget,
   onRemoveDropTarget,
   onSelectDropForAim,
   mockMode,
+  fieldRelative,
+  onMockSimKeyboardDrive,
+  onMockSimPatchSwerve,
   onApplyMockShotFromSim,
   onSaveKnnShootTarget,
 }: SimulationViewProps) {
   /**
    * Nearest map row index: when connected, {@code /KNN/selectedIndex} from the robot (same list order as
-   * {@code knn_map.json}); otherwise local {@link inferKnn} (Y-mirror on red matches {@code KnnInterpreter}).
+   * {@code knn_map.json}); otherwise local {@link inferKnn} on fused WPIBlue pose (no Y mirror).
    */
   const effectiveKnnSelectedIndex = useMemo(() => {
     const inferred = inferKnn(
       { x: poseX, y: poseY, headingDeg },
       shotMapPoints,
-      { k: 1, fieldWidthM: fieldWidthM, isRedAlliance }
+      { k: 1, fieldWidthM }
     );
     const localIdx = inferred?.inferredIndex ?? -1;
     if (connected && knnSelectedIndex >= 0) {
       return knnSelectedIndex;
     }
     return localIdx;
-  }, [
-    poseX,
-    poseY,
-    headingDeg,
-    shotMapPoints,
-    fieldWidthM,
-    isRedAlliance,
-    connected,
-    knnSelectedIndex,
-  ]);
+  }, [poseX, poseY, headingDeg, shotMapPoints, fieldWidthM, connected, knnSelectedIndex]);
 
-  /** Geometric nearest map index if the robot used raw WPIBlue pose for distance (dashboard + NT). */
+  /** Geometric nearest map index: fused WPIBlue pose vs map rows (matches {@code /KNN/nearestIndexBlue}). */
   const effectiveKnnNearestBlue = useMemo(() => {
     if (connected && knnNearestIndexBlue >= 0) {
       return knnNearestIndexBlue;
@@ -448,27 +462,26 @@ export default function SimulationView({
     const inferred = inferKnn(
       { x: poseX, y: poseY, headingDeg },
       shotMapPoints,
-      { k: 1, fieldWidthM, isRedAlliance: false, mirrorRedAllianceLookup: true }
+      { k: 1, fieldWidthM }
     );
     return inferred?.inferredIndex ?? -1;
   }, [connected, knnNearestIndexBlue, poseX, poseY, headingDeg, shotMapPoints, fieldWidthM]);
 
-  /** Geometric nearest map index if the robot used Y-mirrored pose (red-side lookup frame). */
+  /** Same as blue when mirror lookup is off; else legacy NT {@code /KNN/nearestIndexRed}. */
   const effectiveKnnNearestRed = useMemo(() => {
     if (connected && knnNearestIndexRed >= 0) {
       return knnNearestIndexRed;
     }
-    const inferred = inferKnn(
-      { x: poseX, y: poseY, headingDeg },
-      shotMapPoints,
-      { k: 1, fieldWidthM, isRedAlliance: true, mirrorRedAllianceLookup: true }
-    );
-    return inferred?.inferredIndex ?? -1;
-  }, [connected, knnNearestIndexRed, poseX, poseY, headingDeg, shotMapPoints, fieldWidthM]);
+    return effectiveKnnNearestBlue;
+  }, [connected, knnNearestIndexRed, effectiveKnnNearestBlue]);
 
-  type PlaceFieldMode = 'none' | 'drop' | 'origin';
+  type PlaceFieldMode = 'none' | 'drop' | 'origin' | 'sample';
   const [clickedShotIndex, setClickedShotIndex] = useState<number | null>(null);
   const [placeFieldMode, setPlaceFieldMode] = useState<PlaceFieldMode>('none');
+  const [mockPoseXStr, setMockPoseXStr] = useState(() => String(poseX));
+  const [mockPoseYStr, setMockPoseYStr] = useState(() => String(poseY));
+  const [mockPoseHStr, setMockPoseHStr] = useState(() => String(headingDeg));
+  const mockPoseFormRef = useRef<HTMLDivElement | null>(null);
   /** Second arrow on each KNN marker: {@code rotationToFaceHubFromShotMap} heading (linear fit). */
   const [showShotMapHubHeading, setShowShotMapHubHeading] = useState(false);
   const setClickedShotIndexRef = useRef(setClickedShotIndex);
@@ -482,10 +495,30 @@ export default function SimulationView({
   onAddDropTargetRef.current = onAddDropTarget;
   const onAddNamedOriginRef = useRef(onAddNamedOrigin);
   onAddNamedOriginRef.current = onAddNamedOrigin;
+  const onAddShotSampleRef = useRef(onAddShotSample);
+  onAddShotSampleRef.current = onAddShotSample;
   const onSelectDropForAimRef = useRef(onSelectDropForAim);
   onSelectDropForAimRef.current = onSelectDropForAim;
   const setPlaceFieldModeRef = useRef(setPlaceFieldMode);
   setPlaceFieldModeRef.current = setPlaceFieldMode;
+
+  const mockModeRef = useRef(mockMode);
+  mockModeRef.current = mockMode;
+  const fieldRelativeRef = useRef(fieldRelative);
+  fieldRelativeRef.current = fieldRelative;
+  const headingDegRef = useRef(headingDeg);
+  headingDegRef.current = headingDeg;
+  const onMockSimKeyboardDriveRef = useRef(onMockSimKeyboardDrive);
+  onMockSimKeyboardDriveRef.current = onMockSimKeyboardDrive;
+  const onMockSimPatchSwerveRef = useRef(onMockSimPatchSwerve);
+  onMockSimPatchSwerveRef.current = onMockSimPatchSwerve;
+  const wasMockKeyboardDrivingRef = useRef(false);
+  const robotDragActiveRef = useRef(false);
+  const robotDragOffsetRef = useRef({ x: 0, y: 0 });
+  const poseXRef = useRef(poseX);
+  poseXRef.current = poseX;
+  const poseYRef = useRef(poseY);
+  poseYRef.current = poseY;
 
   const simulationSectionRef = useRef<HTMLElement | null>(null);
   const aimPanelDrag = useDraggablePanel(simulationSectionRef);
@@ -526,7 +559,16 @@ export default function SimulationView({
   const dragStartRef = useRef({ x: 0, y: 0 });
   const hasDraggedRef = useRef(false);
   const lastMouseRef = useRef({ x: 0, y: 0 });
-  const keysRef = useRef({ w: false, a: false, s: false, d: false, q: false, e: false });
+  const keysRef = useRef({
+    w: false,
+    a: false,
+    s: false,
+    d: false,
+    q: false,
+    e: false,
+    j: false,
+    l: false,
+  });
   const clockRef = useRef(new THREE.Clock());
 
   useEffect(() => {
@@ -747,12 +789,40 @@ export default function SimulationView({
 
     const onMouseDown = (e: MouseEvent) => {
       pointerDownOnCanvasRef.current = true;
-      isDraggingRef.current = true;
       hasDraggedRef.current = false;
       dragStartRef.current = { x: e.clientX, y: e.clientY };
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      const cam = cameraRef.current;
+      const { fieldLengthM: fL, fieldWidthM: fW } = fieldMetricsRef.current;
+      const fr = fieldRootRef.current;
+
+      if (mockModeRef.current && cam && robotRef.current) {
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cam);
+        const robotHits = raycaster.intersectObject(robotRef.current, true);
+        if (robotHits.length > 0) {
+          const fieldHit = rayNdcToFieldXYWithFieldRoot(ndcX, ndcY, cam, fL, fW, fr);
+          if (fieldHit) {
+            robotDragActiveRef.current = true;
+            robotDragOffsetRef.current = {
+              x: fieldHit.x - poseXRef.current,
+              y: fieldHit.y - poseYRef.current,
+            };
+            isDraggingRef.current = false;
+            return;
+          }
+        }
+      }
+
+      robotDragActiveRef.current = false;
+      isDraggingRef.current = true;
     };
     const onWindowMouseUp = (e: MouseEvent) => {
+      robotDragActiveRef.current = false;
       if (
         pointerDownOnCanvasRef.current &&
         isDraggingRef.current &&
@@ -769,15 +839,19 @@ export default function SimulationView({
           const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
           const cam = cameraRef.current;
           const { fieldLengthM: fL, fieldWidthM: fW } = fieldMetricsRef.current;
+          const fr = fieldRootRef.current;
 
           const pf = placeFieldModeRef.current;
-          if ((pf === 'drop' || pf === 'origin') && cam) {
-            const fieldHit = rayNdcToFieldXY(ndcX, ndcY, cam, fL, fW);
+          if ((pf === 'drop' || pf === 'origin' || pf === 'sample') && cam) {
+            const fieldHit = rayNdcToFieldXYWithFieldRoot(ndcX, ndcY, cam, fL, fW, fr);
             if (fieldHit) {
               if (pf === 'drop') {
                 onAddDropTargetRef.current(fieldHit.x, fieldHit.y);
-              } else {
+              } else if (pf === 'origin') {
                 onAddNamedOriginRef.current(fieldHit.x, fieldHit.y);
+              } else {
+                const idx = onAddShotSampleRef.current(fieldHit.x, fieldHit.y);
+                setClickedShotIndexRef.current(idx);
               }
               setPlaceFieldModeRef.current('none');
             }
@@ -844,6 +918,33 @@ export default function SimulationView({
       isDraggingRef.current = false;
     };
     const onMouseMove = (e: MouseEvent) => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      const cam = cameraRef.current;
+      const { fieldLengthM: fL, fieldWidthM: fW } = fieldMetricsRef.current;
+      const fr = fieldRootRef.current;
+
+      if (robotDragActiveRef.current && mockModeRef.current && cam) {
+        const fieldHit = rayNdcToFieldXYWithFieldRoot(ndcX, ndcY, cam, fL, fW, fr);
+        if (fieldHit) {
+          const { x: ox, y: oy } = robotDragOffsetRef.current;
+          const nx = THREE.MathUtils.clamp(fieldHit.x - ox, 0, fL);
+          const ny = THREE.MathUtils.clamp(fieldHit.y - oy, 0, fW);
+          onMockSimPatchSwerveRef.current({ x: nx, y: ny });
+        }
+        if (
+          Math.hypot(
+            e.clientX - dragStartRef.current.x,
+            e.clientY - dragStartRef.current.y
+          ) > 3
+        ) {
+          hasDraggedRef.current = true;
+        }
+        lastMouseRef.current = { x: e.clientX, y: e.clientY };
+        return;
+      }
+
       if (!isDraggingRef.current) return;
       if (
         Math.hypot(
@@ -871,7 +972,14 @@ export default function SimulationView({
       updateCamera();
     };
     const PAN_SPEED = 8;
+    const isTypingTarget = (t: EventTarget | null) => {
+      if (!(t instanceof HTMLElement)) return false;
+      if (t.isContentEditable) return true;
+      const tag = t.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    };
     const onKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
       const k = e.key.toLowerCase();
       if (k === 'w') keysRef.current.w = true;
       if (k === 's') keysRef.current.s = true;
@@ -879,8 +987,11 @@ export default function SimulationView({
       if (k === 'd') keysRef.current.d = true;
       if (k === 'q') keysRef.current.q = true;
       if (k === 'e') keysRef.current.e = true;
+      if (k === 'j') keysRef.current.j = true;
+      if (k === 'l') keysRef.current.l = true;
     };
     const onKeyUp = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
       const k = e.key.toLowerCase();
       if (k === 'w') keysRef.current.w = false;
       if (k === 's') keysRef.current.s = false;
@@ -888,6 +999,8 @@ export default function SimulationView({
       if (k === 'd') keysRef.current.d = false;
       if (k === 'q') keysRef.current.q = false;
       if (k === 'e') keysRef.current.e = false;
+      if (k === 'j') keysRef.current.j = false;
+      if (k === 'l') keysRef.current.l = false;
     };
 
     container.addEventListener('mousedown', onMouseDown);
@@ -910,7 +1023,58 @@ export default function SimulationView({
     const animate = () => {
       const dt = clockRef.current.getDelta();
       const keys = keysRef.current;
-      if (keys.w || keys.s || keys.a || keys.d || keys.q || keys.e) {
+      const mock = mockModeRef.current;
+
+      if (mock) {
+        let fwd = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
+        let str = (keys.a ? 1 : 0) - (keys.d ? 1 : 0);
+        const mag = Math.hypot(fwd, str);
+        if (mag > 1e-6) {
+          fwd /= mag;
+          str /= mag;
+        }
+        const step = MOCK_SIM_DRIVE_MPS * dt;
+        let dx = 0;
+        let dy = 0;
+        if (fieldRelativeRef.current) {
+          dx = fwd * step;
+          dy = str * step;
+        } else {
+          const th = THREE.MathUtils.degToRad(headingDegRef.current);
+          const cos = Math.cos(th);
+          const sin = Math.sin(th);
+          dx = (fwd * cos + str * sin) * step;
+          dy = (fwd * sin - str * cos) * step;
+        }
+        const rot =
+          ((keys.j ? 1 : 0) - (keys.l ? 1 : 0)) * MOCK_SIM_ROT_DEG_PER_SEC * dt;
+        const trans = keys.w || keys.s || keys.a || keys.d;
+        const active = trans || keys.j || keys.l;
+        if (active) {
+          onMockSimKeyboardDriveRef.current({
+            dx,
+            dy,
+            dHeadingDeg: rot,
+            speedMps: trans ? MOCK_SIM_DRIVE_MPS * mag : 0,
+          });
+          wasMockKeyboardDrivingRef.current = true;
+        } else if (wasMockKeyboardDrivingRef.current) {
+          onMockSimKeyboardDriveRef.current({
+            dx: 0,
+            dy: 0,
+            dHeadingDeg: 0,
+            speedMps: 0,
+          });
+          wasMockKeyboardDrivingRef.current = false;
+        }
+        if (keys.q || keys.e) {
+          const p = panOffsetRef.current;
+          const move = PAN_SPEED * dt;
+          if (keys.q) p.y += move;
+          if (keys.e) p.y -= move;
+          updateCamera();
+        }
+      } else if (keys.w || keys.s || keys.a || keys.d || keys.q || keys.e) {
         const p = panOffsetRef.current;
         const forward = new THREE.Vector3()
           .subVectors(p, camera.position)
@@ -1581,6 +1745,46 @@ export default function SimulationView({
     };
   }, [namedOrigins, fieldLengthM, fieldWidthM]);
 
+  useEffect(() => {
+    if (!mockMode) return;
+    const ae = document.activeElement;
+    if (
+      mockPoseFormRef.current &&
+      ae instanceof Node &&
+      mockPoseFormRef.current.contains(ae)
+    ) {
+      return;
+    }
+    setMockPoseXStr(String(poseX));
+    setMockPoseYStr(String(poseY));
+    setMockPoseHStr(String(headingDeg));
+  }, [mockMode, poseX, poseY, headingDeg]);
+
+  const applyMockPoseFromPanel = useCallback(() => {
+    const x = parseFloat(mockPoseXStr);
+    const y = parseFloat(mockPoseYStr);
+    const h = parseFloat(mockPoseHStr);
+    if (![x, y, h].every(Number.isFinite)) return;
+    onMockSimPatchSwerve({
+      x: THREE.MathUtils.clamp(x, 0, fieldLengthM),
+      y: THREE.MathUtils.clamp(y, 0, fieldWidthM),
+      headingDeg: normalizeHeadingDeg(h),
+    });
+  }, [
+    mockPoseXStr,
+    mockPoseYStr,
+    mockPoseHStr,
+    fieldLengthM,
+    fieldWidthM,
+    onMockSimPatchSwerve,
+  ]);
+
+  const resetMockPoseFormFromSim = useCallback(() => {
+    setMockPoseXStr(String(poseX));
+    setMockPoseYStr(String(poseY));
+    setMockPoseHStr(String(headingDeg));
+  }, [poseX, poseY, headingDeg]);
+
   const globalAimFieldTarget = useMemo(() => {
     if (aimTargetKind === 'hub') {
       return {
@@ -1960,8 +2164,9 @@ export default function SimulationView({
                 · <span style={{ color: '#22d3ee' }}>B{effectiveKnnNearestBlue}</span>
               </span>
             ) : null}
-            {effectiveKnnNearestRed >= 0 ? (
-              <span title="Nearest row, Y-mirrored pose (y′ = W−y)">
+            {effectiveKnnNearestRed >= 0 &&
+            effectiveKnnNearestRed !== effectiveKnnNearestBlue ? (
+              <span title="Legacy NT nearestIndexRed (Y-mirror lookup)">
                 {' '}
                 · <span style={{ color: '#fb923c' }}>R{effectiveKnnNearestRed}</span>
               </span>
@@ -1990,15 +2195,29 @@ export default function SimulationView({
         </label>
       </div>
       <div className="simulation-overlay" aria-hidden="true">
-        <span className="simulation-badge">Simulation</span>
+        <div className="simulation-overlay-left">
+          <span className="simulation-badge">Simulation</span>
+          {mockMode ? (
+            <span
+              className="simulation-mock-keys-hint"
+              title="Uses the same field vs robot-relative mode as the Dashboard tab"
+            >
+              Mock: Aim panel — pose · WASD move · J/L rotate · Q/E camera height
+              {fieldRelative ? ' · field-relative' : ' · robot-relative'}
+            </span>
+          ) : null}
+        </div>
         <span className="simulation-stats">
           {driverStationSummary} · Pose ({poseX.toFixed(1)}, {poseY.toFixed(1)}) · Heading{' '}
           {headingDeg.toFixed(0)}° · Turret {turretAngleDeg.toFixed(0)}° · Hood {hoodPitchDeg.toFixed(0)}° ·
           Flywheel {velocityMps.toFixed(1)} m/s · Shooter {Math.round(shooterRpm)}/
           {Math.round(shooterRpmSetpoint)} rpm · KNN sel{' '}
           {effectiveKnnSelectedIndex >= 0 ? `#${effectiveKnnSelectedIndex}` : '—'} · B
-          {effectiveKnnNearestBlue >= 0 ? effectiveKnnNearestBlue : '—'} · R
-          {effectiveKnnNearestRed >= 0 ? effectiveKnnNearestRed : '—'} · {shotPlacesCount} map shots
+          {effectiveKnnNearestBlue >= 0 ? effectiveKnnNearestBlue : '—'}
+          {effectiveKnnNearestRed >= 0 && effectiveKnnNearestRed !== effectiveKnnNearestBlue
+            ? ` · R${effectiveKnnNearestRed}`
+            : ''}{' '}
+          · {shotPlacesCount} map shots
         </span>
       </div>
 
@@ -2028,6 +2247,63 @@ export default function SimulationView({
             Aim point
           </button>
         </div>
+
+        {mockMode ? (
+          <>
+            <h4 className="simulation-aim-sub">Mock robot pose</h4>
+            <p className="simulation-aim-hint simulation-mock-pose-hint">
+              Field X / Y (m) and heading (°). The robot often starts under this panel at the blue
+              corner, so use these fields instead of clicking the 3D model.
+            </p>
+            <div ref={mockPoseFormRef} className="simulation-mock-pose-form">
+              <label className="simulation-mock-pose-field">
+                <span>X</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step={0.01}
+                  min={0}
+                  max={fieldLengthM}
+                  value={mockPoseXStr}
+                  onChange={(e) => setMockPoseXStr(e.target.value)}
+                  aria-label="Mock pose field X meters"
+                />
+              </label>
+              <label className="simulation-mock-pose-field">
+                <span>Y</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step={0.01}
+                  min={0}
+                  max={fieldWidthM}
+                  value={mockPoseYStr}
+                  onChange={(e) => setMockPoseYStr(e.target.value)}
+                  aria-label="Mock pose field Y meters"
+                />
+              </label>
+              <label className="simulation-mock-pose-field">
+                <span>Heading</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step={1}
+                  value={mockPoseHStr}
+                  onChange={(e) => setMockPoseHStr(e.target.value)}
+                  aria-label="Mock pose heading degrees"
+                />
+              </label>
+              <div className="simulation-mock-pose-actions">
+                <button type="button" className="simulation-mock-pose-apply" onClick={applyMockPoseFromPanel}>
+                  Apply pose
+                </button>
+                <button type="button" className="simulation-mock-pose-reset" onClick={resetMockPoseFormFromSim}>
+                  Reset fields
+                </button>
+              </div>
+            </div>
+          </>
+        ) : null}
 
         <h4 className="simulation-aim-sub">Alignment origins</h4>
         <p className="simulation-aim-hint">
@@ -2070,6 +2346,14 @@ export default function SimulationView({
             onClick={() => setPlaceFieldMode((m) => (m === 'origin' ? 'none' : 'origin'))}
           >
             {placeFieldMode === 'origin' ? 'Place origin (on)' : 'Place named origin'}
+          </button>
+          <button
+            type="button"
+            className={placeFieldMode === 'sample' ? 'simulation-place-active' : ''}
+            onClick={() => setPlaceFieldMode((m) => (m === 'sample' ? 'none' : 'sample'))}
+            title="Click the field to add a KNN map shot at that pose (WPIBlue). Opens inspect so you can set Aim at and save."
+          >
+            {placeFieldMode === 'sample' ? 'Place shot sample (on)' : 'Place shot sample'}
           </button>
         </div>
 
